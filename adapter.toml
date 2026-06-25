@@ -1,0 +1,53 @@
+[adapter]
+slug = "research"
+title = "Research adapter"
+core_version = "0.1"
+aliases = ["ldgr-research"]
+
+[profile]
+loop_prompt_path = "loop-prompt.md"
+default_milestone_template = "templates/milestones.md"
+spec_artifact_path = "templates/research-spec.md"
+readiness_policy = "Block completion while accepted facts lack linked evidence, open questions remain unresolved, active branches have no planned or running experiment, bugs remain open, or pending override approvals exist. A research program is complete only when its key claims are evidence-backed, experiments have interpreted decisions, open questions are answered or explicitly rejected, and follow-up options are either queued or intentionally rejected."
+
+[[target_profiles]]
+slug = "research-program"
+title = "Research program"
+target_type = "investigation"
+description = "A long-running research program: a guiding objective decomposed into classified options, falsifiable experiments, negative results, campaign/branch comparisons, and an evidence-linked claim ledger."
+
+[[target_profiles.probes]]
+slug = "hypothesis-coverage"
+title = "Hypothesis coverage"
+description = "Every in-flight research direction has at least one explicit hypothesis fact with linked evidence or a queued experiment."
+validation_hint = "Review claim-review and experiment-plan artifacts; each active direction should map to pending or running LDGR work."
+
+[[target_profiles.probes]]
+slug = "evidence-quality"
+title = "Evidence quality"
+description = "Validated facts cite concrete runs, artifacts, or validation results - no evidence-free promotions."
+validation_hint = "Review decisions and artifacts; every accepted claim should cite concrete runs, artifacts, or validation notes."
+
+[[target_profiles.probes]]
+slug = "claim-freshness"
+title = "Claim freshness"
+description = "Foundational facts (axioms) carry revalidation cadences and none are past due."
+validation_hint = "Review foundational claims and rerun any stale validation or evidence checks before closing the program."
+
+[[target_profiles.probes]]
+slug = "falsification-trace"
+title = "Falsification trace"
+description = "Important claims name what would weaken or falsify them, with expectations or queued experiments covering the next falsification target."
+validation_hint = "Review claim-review and experiment-plan artifacts; each active hypothesis should have a checkable expectation or pending work item."
+
+[[target_profiles.probes]]
+slug = "negative-result-capture"
+title = "Negative result capture"
+description = "Failed expectations, weakened claims, and surprising failures are preserved as useful research output instead of being discarded."
+validation_hint = "Review negative-result artifacts, failed validation results, and decisions for belief/status transitions."
+
+[[target_profiles.probes]]
+slug = "campaign-comparison"
+title = "Campaign comparison"
+description = "Competing branches share a baseline, validation requirements, rubric, branch artifacts, and a comparative decision."
+validation_hint = "For branch-race work, inspect campaign-branch and campaign-comparison artifacts and the decision selecting or rejecting branches."

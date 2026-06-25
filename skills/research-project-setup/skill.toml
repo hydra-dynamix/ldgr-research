@@ -1,0 +1,29 @@
+version = "0.1.0"
+category = "onboarding"
+tags = ["ldgr", "adapter", "onboarding", "project-setup"]
+activation = ["onboard project", "set up project", "initialize adapter", "prepare first work"]
+
+[[inputs]]
+name = "setup_request"
+required = true
+description = "The operator's project setup or onboarding request."
+
+[[inputs]]
+name = "target_path"
+required = false
+description = "Repository, benchmark, research, or artifact workspace path."
+
+[[outputs]]
+name = "setup_prompt_artifact"
+type = "markdown"
+required = true
+
+[[outputs]]
+name = "setup_observations"
+type = "ldgr-records"
+required = true
+
+[[outputs]]
+name = "first_work_items"
+type = "ldgr-records"
+required = true
