@@ -8,9 +8,9 @@ Usage: ./install-adapter.sh [--adapter-root PATH] [--install-root PATH] [--print
 Install the ldgr-research adapter bundle for LDGR discovery.
 
 Options:
-  --adapter-root PATH  Adapter root containing <slug>/adapter.toml
-                       [default: $LDGR_HOME/adapters or ~/.ldgr/adapters]
-  --install-root PATH  Exact bundle directory [default: <adapter-root>/research]
+  --adapter-root PATH  Adapter root containing .<slug>/adapter.toml
+                       [default: $LDGR_HOME or .ldgr]
+  --install-root PATH  Exact bundle directory [default: <adapter-root>/.research]
   --print-path         Print the installed manifest path only
   -h, --help           Show this help
 EOF
@@ -18,9 +18,9 @@ EOF
 
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 if [ -n "${LDGR_HOME:-}" ]; then
-  adapter_root="$LDGR_HOME/adapters"
+  adapter_root="$LDGR_HOME"
 else
-  adapter_root="${HOME:?HOME is required}/.ldgr/adapters"
+  adapter_root=".ldgr"
 fi
 install_root=""
 print_path=0
@@ -54,7 +54,7 @@ while [ "$#" -gt 0 ]; do
 done
 
 if [ -z "$install_root" ]; then
-  install_root="$adapter_root/research"
+  install_root="$adapter_root/.research"
 fi
 
 mkdir -p "$install_root/templates" "$install_root/skills" "$install_root/docs" "$install_root/scripts"

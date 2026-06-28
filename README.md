@@ -170,7 +170,7 @@ ldgr-research profile discover
 ldgr-research profile apply [research] [--install-root DIR] [--ldgr-db PATH] [--ldgr-artifact-root DIR] [--materialize-only]
 ```
 
-`profile apply` installs or updates the `research-loop` prompt in the target LDGR ledger and marks it active. `--materialize-only` copies adapter files without touching a ledger.
+By default, adapter bundle files are materialized under `.ldgr/.research/`. `profile apply` installs or updates the `research-loop` prompt in the target LDGR ledger and marks it active. `--materialize-only` copies adapter files without touching a ledger.
 
 ## Campaign workflow
 

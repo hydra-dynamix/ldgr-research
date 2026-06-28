@@ -10,6 +10,20 @@ default_milestone_template = "templates/milestones.md"
 spec_artifact_path = "templates/research-spec.md"
 readiness_policy = "Block completion while accepted facts lack linked evidence, open questions remain unresolved, active branches have no planned or running experiment, bugs remain open, or pending override approvals exist. A research program is complete only when its key claims are evidence-backed, experiments have interpreted decisions, open questions are answered or explicitly rejected, and follow-up options are either queued or intentionally rejected."
 
+
+[[commands]]
+namespace = "research"
+argv = ["ldgr-research"]
+aliases = []
+title = "LDGR Research commands"
+description = "Research workflow commands exposed through ldgr core."
+capabilities = ["dispatch", "help"]
+
+[commands.help]
+usage = "ldgr research <command> [options]"
+summary = "Run research adapter workflows from the LDGR control surface."
+details = "Core dispatches arguments after the research namespace to ldgr-research."
+
 [[target_profiles]]
 slug = "research-program"
 title = "Research program"

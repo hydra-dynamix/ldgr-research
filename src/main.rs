@@ -23,6 +23,7 @@ use ldgr::store::{
 };
 
 const PROFILE_PROMPT_SLUG: &str = "research-loop";
+const ADAPTER_INSTALL_DIR: &str = "research";
 const PROFILE_PROMPT_ROLE: &str = "research-loop";
 
 const ADAPTER_TOML: &str = include_str!("../adapter.toml");
@@ -91,13 +92,13 @@ fn adapter_install(args: &[OsString]) -> Result<(), String> {
         ));
     }
 
-    let mut install_root = default_adapter_root().join("research");
+    let mut install_root = default_adapter_root().join(ADAPTER_INSTALL_DIR);
     let mut print_path = false;
     let mut index = 1;
     while index < args.len() {
         match args[index].to_str() {
             Some("--adapter-root") => {
-                install_root = next_path(args, index, "--adapter-root")?.join("research");
+                install_root = next_path(args, index, "--adapter-root")?.join(ADAPTER_INSTALL_DIR);
                 index += 2;
             }
             Some("--install-root") => {
@@ -183,7 +184,7 @@ fn profile_discover(args: &[OsString]) -> Result<(), String> {
 
 fn profile_apply(args: &[OsString]) -> Result<(), String> {
     let mut requested_slug: Option<String> = None;
-    let mut install_root = default_adapter_root().join("research");
+    let mut install_root = default_adapter_root().join(ADAPTER_INSTALL_DIR);
     let mut materialize_only = false;
     let mut ldgr_db = env::var_os("LDGR_DB")
         .map(PathBuf::from)
@@ -262,7 +263,6 @@ fn default_adapter_root() -> PathBuf {
                 .unwrap_or_else(|| PathBuf::from("."))
                 .join(".ldgr")
         })
-        .join("adapters")
 }
 
 #[derive(Debug, Deserialize)]
@@ -347,8 +347,11 @@ fn adapter_search_roots() -> Vec<PathBuf> {
     if let Some(paths) = env::var_os("LDGR_ADAPTER_PATH") {
         roots.extend(env::split_paths(&paths));
     }
+    roots.push(PathBuf::from(".ldgr"));
     if let Some(home) = env::var_os("LDGR_HOME") {
-        roots.push(PathBuf::from(home).join("adapters"));
+        let home = PathBuf::from(home);
+        roots.push(home.clone());
+        roots.push(home.join("adapters"));
     }
     if let Some(home) = env::var_os("HOME") {
         roots.push(PathBuf::from(home).join(".ldgr/adapters"));
@@ -615,18 +618,18 @@ fn print_help() {
 
 fn print_adapter_install_help() {
     println!(
-        "ldgr-research adapter install\n\nOptions:\n      --adapter-root <PATH>  Adapter root; installs a research/ child [default: LDGR_HOME/adapters or ~/.ldgr/adapters]\n      --install-root <PATH>  Exact install directory for the research adapter bundle\n      --print-path           Print the installed adapter.toml path\n  -h, --help                 Print help"
+        "ldgr-research adapter install\n\nOptions:\n      --adapter-root <PATH>  Adapter root; installs a research/ child [default: LDGR_HOME or ~/.ldgr]\n      --install-root <PATH>  Exact install directory for the research adapter bundle\n      --print-path           Print the installed adapter.toml path\n  -h, --help                 Print help"
     );
 }
 
 fn print_profile_apply_help() {
     println!(
-        "ldgr-research profile apply\n\nOptions:\n      --install-root <PATH>       Where to copy the bundled adapter files [default: LDGR_HOME/adapters/research or ~/.ldgr/adapters/research]\n      --materialize-only          Copy files without activating the ledger prompt\n      --ldgr-db <PATH>            LDGR database path [default: LDGR_DB or .ldgr/ldgr.db]\n      --ldgr-artifact-root <PATH> LDGR artifact root [default: LDGR_ARTIFACT_ROOT or .ldgr/artifacts]\n  -h, --help                      Print help"
+        "ldgr-research profile apply\n\nOptions:\n      --install-root <PATH>       Where to copy the bundled adapter files [default: LDGR_HOME/research or ~/.ldgr/research]\n      --materialize-only          Copy files without activating the ledger prompt\n      --ldgr-db <PATH>            LDGR database path [default: LDGR_DB or .ldgr/ldgr.db]\n      --ldgr-artifact-root <PATH> LDGR artifact root [default: LDGR_ARTIFACT_ROOT or .ldgr/artifacts]\n  -h, --help                      Print help"
     );
 }
 
 fn print_profile_discover_help() {
     println!(
-        "ldgr-research profile discover\n\nSearches LDGR_ADAPTER_PATH, LDGR_HOME/adapters, and ~/.ldgr/adapters for <slug>/adapter.toml manifests.\n\nOptions:\n  -h, --help  Print help"
+        "ldgr-research profile discover\n\nSearches LDGR_ADAPTER_PATH, .ldgr, LDGR_HOME, LDGR_HOME, and ~/.ldgr for .<slug>/adapter.toml manifests.\n\nOptions:\n  -h, --help  Print help"
     );
 }
