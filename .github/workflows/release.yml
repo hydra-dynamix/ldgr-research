@@ -31,6 +31,7 @@ jobs:
       PACKAGE: ldgr-research
       BINARY: ldgr-research
       RELEASE_NAME: ldgr-research
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -77,7 +78,8 @@ jobs:
           mkdir -p "$staging"
           cp "target/release/${BINARY}" "$staging/${BINARY}"
           chmod +x "$staging/${BINARY}"
-          cp README.md LICENSE "dist/${RELEASE_NAME}-${version}/"
+          cp README.md "dist/${RELEASE_NAME}-${version}/"
+          if [[ -f LICENSE ]]; then cp LICENSE "dist/${RELEASE_NAME}-${version}/"; fi
           if [[ -f adapter.toml ]]; then cp adapter.toml "dist/${RELEASE_NAME}-${version}/adapter.toml"; fi
           for dir in prompts templates extensions skills scripts docs; do
             if [[ -d "$dir" ]]; then mkdir -p "dist/${RELEASE_NAME}-${version}/${dir}"; cp -R "$dir/." "dist/${RELEASE_NAME}-${version}/${dir}/"; fi
