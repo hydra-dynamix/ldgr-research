@@ -41,13 +41,14 @@ fn run_research(cwd: &Path, args: &[&str]) -> anyhow::Result<String> {
 }
 
 #[test]
-fn help_documents_supported_adapter_surface() -> anyhow::Result<()> {
+fn help_documents_conduct_style_adapter_surface() -> anyhow::Result<()> {
     let mut command = research_command()?;
     command.arg("--help");
     command.assert().success().stdout(
-        predicate::str::contains("ldgr-research adapter install")
-            .and(predicate::str::contains("ldgr-research profile apply"))
-            .and(predicate::str::contains("research-loop prompt")),
+        predicate::str::contains("ldgr-research install")
+            .and(predicate::str::contains("ldgr research <command>"))
+            .and(predicate::str::contains("Canonical LDGR surface"))
+            .and(predicate::str::contains("profile discover/apply remain")),
     );
     Ok(())
 }
@@ -64,9 +65,10 @@ fn adapter_install_materializes_research_bundle() -> anyhow::Result<()> {
         "--install-root",
         install_root.to_str().expect("utf-8 temp path"),
     ]);
-    command.assert().success().stdout(predicate::str::contains(
-        "installed LDGR adapter `research`",
-    ));
+    command.assert().success().stdout(
+        predicate::str::contains("installed LDGR adapter `research`")
+            .and(predicate::str::contains("ldgr research --help")),
+    );
 
     assert!(install_root.join("adapter.toml").is_file());
     assert!(install_root.join("loop-prompt.md").is_file());
@@ -74,6 +76,60 @@ fn adapter_install_materializes_research_bundle() -> anyhow::Result<()> {
         .join("skills/research-project-setup/SKILL.md")
         .is_file());
     assert!(install_root.join("scripts/campaign_launch.sh").is_file());
+    Ok(())
+}
+
+#[test]
+fn install_alias_installs_harness_resources() -> anyhow::Result<()> {
+    let temp = TempDir::new()?;
+    let install_root = temp.path().join("research-adapter");
+    let home = temp.path().join("home");
+
+    let mut command = research_command()?;
+    command.env("HOME", &home).args([
+        "install",
+        "--install-root",
+        install_root.to_str().expect("utf-8 temp path"),
+    ]);
+    command
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("installed research skills"));
+
+    assert!(install_root.join("adapter.toml").is_file());
+    assert!(home
+        .join(".pi/agent/skills/research-project-setup/SKILL.md")
+        .is_file());
+    assert!(home.join(".ldgr/research/harness-setup.md").is_file());
+    Ok(())
+}
+
+#[test]
+fn init_installs_research_loop_prompt_and_adapter_resources() -> anyhow::Result<()> {
+    let temp = TempDir::new()?;
+    let home = temp.path().join("home");
+    research_command()?
+        .current_dir(temp.path())
+        .env("HOME", &home)
+        .arg("init")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "activated LDGR research loop prompt",
+        ));
+
+    assert!(temp.path().join(".ldgr/research/research.db").is_file());
+    assert!(home.join(".ldgr/research/harness-setup.md").is_file());
+    assert!(home
+        .join(".pi/agent/skills/research-project-setup/SKILL.md")
+        .is_file());
+    let connection = rusqlite::Connection::open(temp.path().join(".ldgr/ldgr.db"))?;
+    let status: String = connection.query_row(
+        "SELECT status FROM prompt WHERE slug = 'research-loop'",
+        [],
+        |row| row.get(0),
+    )?;
+    assert_eq!(status, "active");
     Ok(())
 }
 

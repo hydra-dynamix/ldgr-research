@@ -55,6 +55,18 @@ const SETUP_EXAMPLE: &str =
     include_str!("../skills/research-project-setup/examples/setup-summary.md");
 const SETUP_VALIDATOR: &str =
     include_str!("../skills/research-project-setup/validators/setup_completeness.md");
+const RESEARCH_HARNESS_GUIDE: &str = r#"# LDGR Research harness guide
+
+Use `ldgr research <command>` for research adapter workflows after installing the research adapter. Start with `ldgr research --help`, then initialize project research state with `ldgr research init` or `ldgr-research init`.
+
+Research adapter resources installed by `ldgr-research install`:
+
+- adapter bundle: `~/.ldgr/research` by default
+- skill: `research-project-setup`
+- active core loop prompt: `research-loop` after `ldgr-research init`
+
+Core LDGR commands remain available through `ldgr`. The research adapter owns research-specific programs, branches, options, experiments, facts, metrics, and reports.
+"#;
 
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
@@ -68,18 +80,29 @@ fn main() {
 
 fn run() -> Result<(), String> {
     let args = env::args_os().skip(1).collect::<Vec<_>>();
+    let research_command = first_research_command(&args).map(str::to_owned);
     match args.first().and_then(|arg| arg.to_str()) {
         None | Some("--help") | Some("-h") => {
             print_help();
             Ok(())
         }
+        Some("install") => install_alias(&args[1..]),
         Some("adapter") => adapter_install(&args[1..]),
         Some("profile") => profile(&args[1..]),
-        _ if first_research_command(&args).is_some() => {
-            cli::run().map_err(|error| format!("{error:#}"))
+        _ if research_command.as_deref() == Some("init") && !has_help_flag(&args) => {
+            research_init_with_adapter_resources()
         }
+        _ if research_command.is_some() => cli::run().map_err(|error| format!("{error:#}")),
         Some(_) => pass_through_ldgr(&args),
     }
+}
+
+fn install_alias(args: &[OsString]) -> Result<(), String> {
+    if has_help_flag(args) {
+        print_install_help();
+        return Ok(());
+    }
+    install_adapter_bundle_from_options(args)
 }
 
 fn adapter_install(args: &[OsString]) -> Result<(), String> {
@@ -92,9 +115,13 @@ fn adapter_install(args: &[OsString]) -> Result<(), String> {
         ));
     }
 
+    install_adapter_bundle_from_options(&args[1..])
+}
+
+fn install_adapter_bundle_from_options(args: &[OsString]) -> Result<(), String> {
     let mut install_root = default_adapter_root().join(ADAPTER_INSTALL_DIR);
     let mut print_path = false;
-    let mut index = 1;
+    let mut index = 0;
     while index < args.len() {
         match args[index].to_str() {
             Some("--adapter-root") => {
@@ -119,6 +146,7 @@ fn adapter_install(args: &[OsString]) -> Result<(), String> {
     }
 
     let manifest_path = install_bundle(&install_root)?;
+    install_adapter_harness_resources(&install_root)?;
     if print_path {
         println!("{}", manifest_path.display());
     } else {
@@ -126,11 +154,35 @@ fn adapter_install(args: &[OsString]) -> Result<(), String> {
             "installed LDGR adapter `research`: {}",
             manifest_path.display()
         );
-        println!(
-            "next: `ldgr-research profile discover` then `ldgr-research profile apply research`"
-        );
+        println!("next: `ldgr research --help` or `ldgr-research init`");
     }
     Ok(())
+}
+
+fn research_init_with_adapter_resources() -> Result<(), String> {
+    cli::run().map_err(|error| format!("{error:#}"))?;
+    let install_root = default_adapter_root().join(ADAPTER_INSTALL_DIR);
+    let manifest_path = install_bundle(&install_root)?;
+    install_adapter_harness_resources(&install_root)?;
+    let ldgr_db = env::var_os("LDGR_DB")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(".ldgr/ldgr.db"));
+    let ldgr_artifact_root = env::var_os("LDGR_ARTIFACT_ROOT")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(".ldgr/artifacts"));
+    apply_research_prompt(&ldgr_db, &ldgr_artifact_root, &install_root)?;
+    println!(
+        "installed LDGR adapter `research`: {}",
+        manifest_path.display()
+    );
+    println!("activated LDGR research loop prompt {PROFILE_PROMPT_SLUG}");
+    println!("next: `ldgr research --help` or `ldgr-research status`");
+    Ok(())
+}
+
+fn has_help_flag(args: &[OsString]) -> bool {
+    args.iter()
+        .any(|arg| matches!(arg.to_str(), Some("--help") | Some("-h")))
 }
 
 fn profile(args: &[OsString]) -> Result<(), String> {
@@ -234,6 +286,7 @@ fn profile_apply(args: &[OsString]) -> Result<(), String> {
     }
 
     let manifest_path = install_bundle(&install_root)?;
+    install_adapter_harness_resources(&install_root)?;
     println!(
         "installed LDGR adapter `research`: {}",
         manifest_path.display()
@@ -450,6 +503,137 @@ fn install_bundle(install_root: &Path) -> Result<PathBuf, String> {
     Ok(install_root.join("adapter.toml"))
 }
 
+fn install_adapter_harness_resources(install_root: &Path) -> Result<(), String> {
+    let home = env::var_os("HOME")
+        .or_else(|| env::var_os("USERPROFILE"))
+        .map(PathBuf::from)
+        .ok_or_else(|| {
+            "could not determine HOME/USERPROFILE for harness asset install".to_string()
+        })?;
+    let config = read_ldgr_harness_config(&home);
+    let skill_dirs = configured_skill_dirs(&home, &config);
+    let skills = install_root.join("skills");
+    if skills.is_dir() {
+        for dir in &skill_dirs {
+            copy_directory_children(&skills, dir)?;
+        }
+        if !skill_dirs.is_empty() {
+            println!(
+                "installed research skills to {}",
+                skill_dirs
+                    .iter()
+                    .map(|path| path.display().to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+        }
+    }
+    write_parented(
+        &home.join(".ldgr/research/harness-setup.md"),
+        RESEARCH_HARNESS_GUIDE,
+    )?;
+    Ok(())
+}
+
+fn read_ldgr_harness_config(home: &Path) -> Option<serde_json::Value> {
+    let text = fs::read_to_string(home.join(".ldgr/config.json")).ok()?;
+    serde_json::from_str(&text).ok()
+}
+
+fn configured_skill_dirs(home: &Path, config: &Option<serde_json::Value>) -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    if let Some(config) = config {
+        if let Some(installed) = config.get("installed").and_then(|value| value.as_array()) {
+            for harness in installed {
+                if let Some(paths) = harness
+                    .get("skill_paths")
+                    .and_then(|value| value.as_array())
+                {
+                    dirs.extend(
+                        paths
+                            .iter()
+                            .filter_map(json_path)
+                            .map(|path| expand_home_path(home, path)),
+                    );
+                }
+            }
+        }
+    }
+    if dirs.is_empty() {
+        dirs.push(home.join(".pi/agent/skills"));
+    }
+    dedup_paths(dirs)
+}
+
+fn json_path(value: &serde_json::Value) -> Option<&str> {
+    value.as_str()
+}
+
+fn expand_home_path(home: &Path, value: &str) -> PathBuf {
+    value
+        .strip_prefix("~/")
+        .map(|suffix| home.join(suffix))
+        .unwrap_or_else(|| PathBuf::from(value))
+}
+
+fn dedup_paths(paths: Vec<PathBuf>) -> Vec<PathBuf> {
+    let mut deduped = Vec::new();
+    for path in paths {
+        if !deduped.contains(&path) {
+            deduped.push(path);
+        }
+    }
+    deduped
+}
+
+fn copy_directory_children(from: &Path, to: &Path) -> Result<(), String> {
+    fs::create_dir_all(to)
+        .map_err(|error| format!("failed to create {}: {error}", to.display()))?;
+    for entry in
+        fs::read_dir(from).map_err(|error| format!("failed to read {}: {error}", from.display()))?
+    {
+        let entry =
+            entry.map_err(|error| format!("failed to read {} entry: {error}", from.display()))?;
+        let source = entry.path();
+        let dest = to.join(entry.file_name());
+        if source.is_dir() {
+            copy_dir_recursive(&source, &dest)?;
+        } else if source.is_file() {
+            write_parented(
+                &dest,
+                &fs::read_to_string(&source)
+                    .map_err(|error| format!("failed to read {}: {error}", source.display()))?,
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn copy_dir_recursive(from: &Path, to: &Path) -> Result<(), String> {
+    fs::create_dir_all(to)
+        .map_err(|error| format!("failed to create {}: {error}", to.display()))?;
+    for entry in
+        fs::read_dir(from).map_err(|error| format!("failed to read {}: {error}", from.display()))?
+    {
+        let entry =
+            entry.map_err(|error| format!("failed to read {} entry: {error}", from.display()))?;
+        let source = entry.path();
+        let dest = to.join(entry.file_name());
+        if source.is_dir() {
+            copy_dir_recursive(&source, &dest)?;
+        } else if source.is_file() {
+            fs::copy(&source, &dest).map_err(|error| {
+                format!(
+                    "failed to copy {} to {}: {error}",
+                    source.display(),
+                    dest.display()
+                )
+            })?;
+        }
+    }
+    Ok(())
+}
+
 fn write_parented(path: &Path, content: &str) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
@@ -612,24 +796,30 @@ fn apply_research_prompt(
 
 fn print_help() {
     println!(
-        "ldgr-research\n\nUsage:\n  ldgr-research adapter install [OPTIONS]\n  ldgr-research profile discover [OPTIONS]\n  ldgr-research profile apply [research] [OPTIONS]\n  ldgr-research <ldgr-command> [ARGS...]\n\nCommands:\n  adapter install    Install the bundled LDGR research adapter files.\n  profile discover   List installed LDGR adapter manifests.\n  profile apply      Install files and activate the research-loop prompt in an LDGR ledger.\n\nCore LDGR pass-through:\n  Any other command is forwarded to `ldgr`. `ldgr-research loop run` defaults to --prompt-slug research-loop when no prompt source is supplied."
+        "ldgr-research\n\nUsage:\n  ldgr-research install [OPTIONS]\n  ldgr-research adapter install [OPTIONS]\n  ldgr-research init\n  ldgr research <command> [options]\n  ldgr-research <ldgr-command> [ARGS...]\n\nCommands:\n  install            Install the research adapter bundle and harness resources.\n  adapter install    Compatibility alias for `ldgr-research install`.\n  init               Initialize project research state and activate research-loop.\n  <research-command> Run research programs, branches, options, experiments, facts, and reports.\n\nCanonical LDGR surface:\n  After install, prefer `ldgr research <command>` so core owns discovery and dispatch.\n  `ldgr-research <command>` remains available for direct use and core pass-through.\n  `ldgr-research loop run` defaults to --prompt-slug research-loop when no prompt source is supplied.\n\nCompatibility:\n  profile discover/apply remain for older scripts, but new adapters should follow the install/init/dispatch pattern used by ldgr-conduct."
+    );
+}
+
+fn print_install_help() {
+    println!(
+        "ldgr-research install\n\nOptions:\n      --adapter-root <PATH>  Adapter root; installs a research/ child [default: LDGR_HOME or ~/.ldgr]\n      --install-root <PATH>  Exact install directory for the research adapter bundle\n      --print-path           Print the installed adapter.toml path\n  -h, --help                 Print help\n\nInstalls the adapter bundle plus harness resources. After install, use `ldgr research --help`."
     );
 }
 
 fn print_adapter_install_help() {
     println!(
-        "ldgr-research adapter install\n\nOptions:\n      --adapter-root <PATH>  Adapter root; installs a research/ child [default: LDGR_HOME or ~/.ldgr]\n      --install-root <PATH>  Exact install directory for the research adapter bundle\n      --print-path           Print the installed adapter.toml path\n  -h, --help                 Print help"
+        "ldgr-research adapter install\n\nCompatibility alias for `ldgr-research install`.\n\nOptions:\n      --adapter-root <PATH>  Adapter root; installs a research/ child [default: LDGR_HOME or ~/.ldgr]\n      --install-root <PATH>  Exact install directory for the research adapter bundle\n      --print-path           Print the installed adapter.toml path\n  -h, --help                 Print help"
     );
 }
 
 fn print_profile_apply_help() {
     println!(
-        "ldgr-research profile apply\n\nOptions:\n      --install-root <PATH>       Where to copy the bundled adapter files [default: LDGR_HOME/research or ~/.ldgr/research]\n      --materialize-only          Copy files without activating the ledger prompt\n      --ldgr-db <PATH>            LDGR database path [default: LDGR_DB or .ldgr/ldgr.db]\n      --ldgr-artifact-root <PATH> LDGR artifact root [default: LDGR_ARTIFACT_ROOT or .ldgr/artifacts]\n  -h, --help                      Print help"
+        "ldgr-research profile apply\n\nCompatibility surface for older scripts. Prefer `ldgr-research install` and `ldgr-research init`, then use `ldgr research <command>`.\n\nOptions:\n      --install-root <PATH>       Where to copy the bundled adapter files [default: LDGR_HOME/research or ~/.ldgr/research]\n      --materialize-only          Copy files without activating the ledger prompt\n      --ldgr-db <PATH>            LDGR database path [default: LDGR_DB or .ldgr/ldgr.db]\n      --ldgr-artifact-root <PATH> LDGR artifact root [default: LDGR_ARTIFACT_ROOT or .ldgr/artifacts]\n  -h, --help                      Print help"
     );
 }
 
 fn print_profile_discover_help() {
     println!(
-        "ldgr-research profile discover\n\nSearches LDGR_ADAPTER_PATH, .ldgr, LDGR_HOME, LDGR_HOME, and ~/.ldgr for .<slug>/adapter.toml manifests.\n\nOptions:\n  -h, --help  Print help"
+        "ldgr-research profile discover\n\nCompatibility surface for older scripts. Prefer core discovery with `ldgr adapter list` and dispatch through `ldgr research <command>`.\n\nOptions:\n  -h, --help  Print help"
     );
 }

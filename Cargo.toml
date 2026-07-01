@@ -30,3 +30,5 @@ assert_cmd = "2.0"
 predicates = "3.1"
 serde_json = "1.0"
 tempfile = "3.10"
+
+[workspace]
