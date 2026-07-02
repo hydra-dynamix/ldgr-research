@@ -42,7 +42,7 @@ pub struct ResearchTool {
     pub extra: BTreeMap<String, serde_yaml::Value>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ToolKind {
     Diagnostic,
@@ -53,44 +53,29 @@ pub enum ToolKind {
     Perturbation,
     Fixture,
     ReportTemplate,
+    #[default]
     Other,
 }
 
-impl Default for ToolKind {
-    fn default() -> Self {
-        Self::Other
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ToolMutability {
     ReadOnly,
     WritesArtifacts,
     MutatesSubstrate,
+    #[default]
     Unknown,
 }
 
-impl Default for ToolMutability {
-    fn default() -> Self {
-        Self::Unknown
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ToolStatus {
+    #[default]
     Active,
     Draft,
     Deprecated,
     Broken,
     Archived,
-}
-
-impl Default for ToolStatus {
-    fn default() -> Self {
-        Self::Active
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

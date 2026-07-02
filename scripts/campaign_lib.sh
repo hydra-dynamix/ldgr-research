@@ -72,10 +72,10 @@ campaign_write_env() {
   done
 }
 
-campaign_ldgr_profile_apply() {
+campaign_ldgr_init() {
   local worktree=$1
-  command -v ldgr-research >/dev/null 2>&1 || campaign_die "ldgr-research is required to apply campaign lane profiles"
-  (cd "$worktree" && ldgr-research profile apply research)
+  command -v ldgr-research >/dev/null 2>&1 || campaign_die "ldgr-research is required to initialize campaign lanes"
+  (cd "$worktree" && ldgr-research init)
 }
 
 campaign_ensure_local_excludes() {

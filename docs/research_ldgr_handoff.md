@@ -3,7 +3,7 @@
 `ldgr-research` is built around a simple idea: a useful research ledger should
 help a project survive being wrong.
 
-Instead of treating research as a pile of notes and files, the profile centers
+Instead of treating research as a pile of notes and files, the adapter centers
 work around claims, expectations, experiments, evidence, decisions, and status
 transitions. The output of a failed expectation is not noise; it is often the
 result that changes the next question.

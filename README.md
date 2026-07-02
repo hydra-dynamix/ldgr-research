@@ -23,9 +23,23 @@ ldgr research status
 ldgr research loop run
 ```
 
-This follows the `ldgr-conduct` adapter pattern: the adapter binary owns install/init/resources/workflows, while LDGR core owns adapter discovery and dispatch through `adapter.toml`. `ldgr-research adapter install` remains as a compatibility alias for `ldgr-research install`.
+This follows the `ldgr-conduct` adapter pattern: the adapter binary owns install/init/resources/workflows, while LDGR core owns adapter discovery and dispatch through `adapter.toml`. `ldgr-research adapter install` is the installer entrypoint used by LDGR core; humans can run `ldgr-research install`.
 
 `ldgr-research init` initializes project research state, materializes the adapter bundle/harness resources when needed, and installs/activates the core `research-loop` prompt. `ldgr-research loop run` and `ldgr research loop run` forward to `ldgr loop run` and automatically supply `--prompt-slug research-loop` when no prompt source is provided.
+
+## Agent quickstart
+
+Agents should start from the project root with:
+
+```sh
+ldgr research init
+ldgr research agent-guide
+ldgr research doctor
+ldgr research status
+ldgr research context
+```
+
+`agent-guide` prints copy-pasteable commands for creating the initial program/branch/question/option spine and for running guard/lint checks.
 
 ## State layout
 
@@ -168,25 +182,19 @@ ldgr-research loop run --bundle cleanroom --prompt-role research-loop
 
 ```sh
 ldgr-research install [--adapter-root DIR | --install-root DIR] [--print-path]
-ldgr-research adapter install [--adapter-root DIR | --install-root DIR] [--print-path]  # compatibility alias
+ldgr-research adapter install [--adapter-root DIR | --install-root DIR] [--print-path]
 ldgr-research init
 ldgr research <command> [options]
+ldgr research agent-guide
 ```
 
 By default, adapter bundle files are materialized under `LDGR_HOME/research` or `~/.ldgr/research`. Install copies adapter-owned skills into configured harness skill paths from `~/.ldgr/config.json`, defaulting to `~/.pi/agent/skills` when no harness config is present.
 
-Compatibility profile commands remain for older scripts:
-
-```sh
-ldgr-research profile discover
-ldgr-research profile apply [research] [--install-root DIR] [--ldgr-db PATH] [--ldgr-artifact-root DIR] [--materialize-only]
-```
-
-Prefer `ldgr-research install` plus `ldgr-research init` for new workflows.
+There is no separate profile step. Install the adapter once, initialize each project with `ldgr research init`, then use the canonical `ldgr research <command>` control surface.
 
 ## Campaign workflow
 
-For multi-lane branch races, see [`docs/research-campaign-process.md`](docs/research-campaign-process.md). The campaign scripts create worktrees, apply the research profile in each lane, run bounded loops, collect lane status/context, and generate a comparison report.
+For multi-lane branch races, see [`docs/research-campaign-process.md`](docs/research-campaign-process.md). The campaign scripts create worktrees, initialize the research adapter in each lane, run bounded loops, collect lane status/context, and generate a comparison report.
 
 ## Development
 

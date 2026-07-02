@@ -10,7 +10,7 @@ usage() {
 Usage: scripts/campaign_create.sh --slug SLUG --title TITLE --question QUESTION --lane SLUG:HYPOTHESIS [--lane ...] [OPTIONS]
 
 Create a research campaign protocol, one git worktree per lane, initialize LDGR
-with the research profile in each lane, add BRANCH_TASK.md, and create a lane
+with the research adapter initialized in each lane, add BRANCH_TASK.md, and create a lane
 work item.
 
 Options:
@@ -136,7 +136,7 @@ while IFS=$'\t' read -r lane branch worktree hypothesis; do
     git worktree add -b "$branch" "$worktree" "$baseline_commit"
   fi
   campaign_ensure_local_excludes "$worktree"
-  campaign_ldgr_profile_apply "$worktree"
+  campaign_ldgr_init "$worktree"
   cat > "$worktree/BRANCH_TASK.md" <<EOF
 # Campaign lane: $lane
 

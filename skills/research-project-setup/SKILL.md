@@ -16,10 +16,10 @@ Use this skill before running adapter automation on a project that has not been 
 1. **Preserve the setup prompt.** Record the operator's project/setup request and any target paths as a prompt artifact on the active run.
 2. **Inspect the target.** Review the relevant repository, benchmark, research program, or artifact workspace. Record observations with path and command evidence.
 3. **Initialize durable state.** Run safe initialization for LDGR and this adapter when needed. Do not overwrite existing state unless the operator explicitly asks.
-4. **Apply the adapter profile.** Materialize/apply the adapter profile from the installed bundle when needed, then verify the profile and tools are visible to LDGR.
+4. **Initialize the research adapter.** Run `ldgr research init` from the project root, then verify `doctor`, `status`, and `context` work.
 5. **Capture setup artifacts.** Attach inventories, config summaries, command outputs, or reports that help future agents continue without rediscovery.
 6. **Create first work.** Decompose the setup findings into actionable LDGR work items with validation hints and evidence pointers.
-7. **Summarize handoff.** Report created artifacts, observations, work items, active profile/tooling state, and the recommended next command.
+7. **Summarize handoff.** Report created artifacts, observations, work items, active adapter/tooling state, and the recommended next command.
 
 ## Adapter focus
 
@@ -27,11 +27,11 @@ Research projects should preserve hypotheses, claims, evidence, open questions, 
 
 ## Setup hints
 
-Useful commands: ./install-adapter.sh, ldgr-research init, ldgr-research profile discover, ldgr-research profile apply research, ldgr-research context, ldgr-research option list, ldgr-research fact list, and ldgr-research work create for experiments or literature/code investigations.
+Useful commands: ./install-adapter.sh, ldgr-research init, ldgr-research context, ldgr-research option list, ldgr-research fact list, and ldgr-research work create for experiments or literature/code investigations.
 
 ## Validation hints
 
-Check that the research profile is applied, the research ledger is initialized, facts have evidence links where appropriate, open questions are represented as questions/options/work, and one concrete next hypothesis is queued.
+Check that the research adapter is initialized, the research ledger is initialized, facts have evidence links where appropriate, open questions are represented as questions/options/work, and one concrete next hypothesis is queued.
 
 ## Guardrails
 

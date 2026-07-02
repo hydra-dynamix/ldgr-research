@@ -64,7 +64,7 @@ What the script does:
 1. writes `.ldgr/campaigns/<slug>/campaign.env` and `lanes.tsv`;
 2. writes `research-campaigns/<slug>/protocol.md`;
 3. creates one git branch/worktree per lane from the baseline commit;
-4. initializes LDGR and applies the research profile in each worktree;
+4. initializes LDGR and initializes the research adapter in each worktree;
 5. writes `BRANCH_TASK.md` in each lane;
 6. creates one lane work item per worktree;
 7. commits lane initialization in each lane;

@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 use std::fs;
 use std::io::Read;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::str::FromStr;
 
 use anyhow::{bail, Context};
@@ -49,6 +49,8 @@ pub enum Command {
     Init,
     /// Print the active research cockpit.
     Context,
+    /// Print a copy-pasteable guide for autonomous agents using ldgr-research.
+    AgentGuide,
     /// Manage research programs.
     Program(ProgramArgs),
     /// Manage research branches.
@@ -115,6 +117,7 @@ pub fn run() -> anyhow::Result<()> {
     match cli.command {
         Command::Init => init_project(&cli.db, &cli.policy, &cli.tools),
         Command::Context => handle_context(&cli.db, &cli.policy, cli.enable_graph_reasoning),
+        Command::AgentGuide => handle_agent_guide(),
         Command::Program(args) => handle_program(&cli.db, &cli.policy, args),
         Command::Branch(args) => handle_branch(&cli.db, &cli.policy, args),
         Command::Experiment(args) => handle_experiment(&cli.db, &cli.policy, args),
@@ -163,6 +166,10 @@ fn init_project(db: &Path, policy: &Path, tools: &Path) -> anyhow::Result<()> {
     if result.policy_written {
         println!("created starter policy");
     }
+    let artifact_roots = ensure_allowed_artifact_roots(policy)?;
+    if !artifact_roots.is_empty() {
+        println!("created artifact roots: {}", artifact_roots.join(", "));
+    }
     if tools_written {
         println!("created starter tool registry");
     }
@@ -175,6 +182,39 @@ fn init_project(db: &Path, policy: &Path, tools: &Path) -> anyhow::Result<()> {
             .join(", ");
         println!("applied migrations: {versions}");
     }
+    Ok(())
+}
+
+fn ensure_allowed_artifact_roots(policy: &Path) -> anyhow::Result<Vec<String>> {
+    let policy_doc = crate::policy::load_policy(policy)?;
+    let mut created = Vec::new();
+    for root in policy_doc.allowed_artifact_roots {
+        let path = Path::new(root.trim_end_matches('/'));
+        if !safe_relative_directory(path) {
+            continue;
+        }
+        if !path.exists() {
+            fs::create_dir_all(path).with_context(|| {
+                format!("failed to create allowed artifact root {}", path.display())
+            })?;
+            created.push(root);
+        }
+    }
+    Ok(created)
+}
+
+fn safe_relative_directory(path: &Path) -> bool {
+    !path.as_os_str().is_empty()
+        && path.is_relative()
+        && path
+            .components()
+            .all(|component| matches!(component, Component::Normal(_) | Component::CurDir))
+}
+
+fn handle_agent_guide() -> anyhow::Result<()> {
+    println!(
+        "# LDGR Research agent guide\n\nRun these commands from the project root. Prefer the canonical core dispatch form: `ldgr research <command>`.\n\n## First use in a project\n\n```sh\nldgr research init\nldgr research doctor\nldgr research status\nldgr research context\n```\n\n## Create an initial research spine\n\n```sh\nldgr research program create <program-slug> --title \"<title>\" --objective \"<objective>\"\nldgr research program set-current <program-slug>\nldgr research branch create main --program <program-slug> --title \"Main\" --question \"<question>\" --rationale \"<why this branch>\"\nldgr research branch set-current main\nldgr research question add <question-slug> --program <program-slug> --branch main --question \"<open question>\"\nldgr research option add <option-slug> --program <program-slug> --branch main --question <question-slug> --classification main_path --description \"<candidate answer or plan>\"\nldgr research experiment create first-check --branch main --option <option-slug> --mode exploration --title \"First check\" --hypothesis \"<what should be true>\" --setup \"<validation command or evidence-gathering step>\" --observation-goal \"<what to observe>\"\n```\n\n## Evidence and checks\n\n```sh\nldgr research fact add <fact-slug> --program <program-slug> --statement \"<evidence-backed fact>\" --status candidate --evidence-report \"<artifact, command, paper, or observation>\"\nldgr research guard\nldgr research lint\n```\n\n## Agent loop\n\n```sh\nldgr research loop run --dry-run\nldgr research loop run\n```\n\nRules for agents:\n- run `doctor`, `status`, and `context` before making changes;\n- record evidence as facts/artifacts/metrics before decisions;\n- keep LDGR core records authoritative;\n- install/init are the only adapter setup steps.\n"
+    );
     Ok(())
 }
 
