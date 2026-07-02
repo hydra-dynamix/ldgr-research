@@ -27,7 +27,7 @@ ldgr research loop run
 
 This follows the `ldgr-conduct` adapter pattern: the adapter binary owns install/init/resources/workflows, while LDGR core owns adapter discovery and dispatch through `adapter.toml`. `ldgr-research adapter install` is the installer entrypoint used by LDGR core; humans can run `ldgr-research install`.
 
-`ldgr-research init` initializes project research state, materializes the adapter bundle/harness resources when needed, and installs/activates the core `research-loop` prompt. `ldgr-research loop run` and `ldgr research loop run` forward to `ldgr loop run` and automatically supply `--prompt-slug research-loop` when research mode is enabled and no prompt source is provided.
+`ldgr-research install` materializes adapter resources under `~/.ldgr/research`, copies the research prompt to the centralized prompt directory `~/.ldgr/prompts/research-loop.md`, and installs adapter-owned skills into configured harness skill paths. `ldgr-research init` initializes project research state and imports/activates the `research-loop` prompt in the project core LDGR database. `ldgr-research loop run` and `ldgr research loop run` forward to `ldgr loop run` and automatically supply `--prompt-slug research-loop` when research mode is enabled and no explicit prompt source is provided.
 
 ## Research overlay mode
 
@@ -76,6 +76,7 @@ ldgr research context
 .ldgr/research/research.db        # research primitives
 .ldgr/research/policy.yaml        # research policy/current program/branch
 .ldgr/research/tools.yaml         # reusable research tool registry
+~/.ldgr/prompts/research-loop.md  # centralized installed research loop prompt
 ```
 
 ## Core workflow
@@ -229,7 +230,7 @@ ldgr research mode <status|enable|disable>
 ldgr research core <ldgr-command>
 ```
 
-By default, adapter bundle files are materialized under `LDGR_HOME/research` or `~/.ldgr/research`. Install copies adapter-owned skills into configured harness skill paths from `~/.ldgr/config.json`, defaulting to `~/.pi/agent/skills` when no harness config is present.
+By default, adapter bundle files are materialized under `LDGR_HOME/research` or `~/.ldgr/research`. Install also copies prompt files into `LDGR_HOME/prompts` or `~/.ldgr/prompts`, and copies adapter-owned skills into configured harness skill paths from `~/.ldgr/config.json`, defaulting to `~/.pi/agent/skills` when no harness config is present. The same bundle layout is used by `ldgr adapter install research`, so core adapter installation also installs prompts and skills.
 
 There is no separate profile step. Install the adapter once, initialize each project with `ldgr research init`, then use the canonical `ldgr research <command>` control surface.
 

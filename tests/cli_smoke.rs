@@ -73,6 +73,7 @@ fn adapter_install_materializes_research_bundle() -> anyhow::Result<()> {
 
     assert!(install_root.join("adapter.toml").is_file());
     assert!(install_root.join("loop-prompt.md").is_file());
+    assert!(install_root.join("prompts/research-loop.md").is_file());
     assert!(install_root
         .join("skills/research-project-setup/SKILL.md")
         .is_file());
@@ -98,6 +99,7 @@ fn install_alias_installs_harness_resources() -> anyhow::Result<()> {
         .stdout(predicate::str::contains("installed research skills"));
 
     assert!(install_root.join("adapter.toml").is_file());
+    assert!(home.join(".ldgr/prompts/research-loop.md").is_file());
     assert!(home
         .join(".pi/agent/skills/research-project-setup/SKILL.md")
         .is_file());
@@ -120,6 +122,7 @@ fn init_installs_research_loop_prompt_and_adapter_resources() -> anyhow::Result<
         ));
 
     assert!(temp.path().join(".ldgr/research/research.db").is_file());
+    assert!(home.join(".ldgr/prompts/research-loop.md").is_file());
     assert!(home.join(".ldgr/research/harness-setup.md").is_file());
     assert!(home
         .join(".pi/agent/skills/research-project-setup/SKILL.md")
@@ -193,6 +196,7 @@ fn init_prefers_existing_adapter_path_for_bundle_refresh() -> anyhow::Result<()>
         )));
 
     assert!(adapter_root.join("loop-prompt.md").is_file());
+    assert!(adapter_root.join("prompts/research-loop.md").is_file());
     assert!(!home.join(".ldgr/research/adapter.toml").exists());
     Ok(())
 }

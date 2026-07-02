@@ -22,6 +22,8 @@ use ldgr::store::{
 
 const RESEARCH_LOOP_PROMPT_SLUG: &str = "research-loop";
 const ADAPTER_INSTALL_DIR: &str = "research";
+const CENTRAL_PROMPTS_DIR: &str = "prompts";
+const RESEARCH_LOOP_PROMPT_FILE: &str = "research-loop.md";
 const RESEARCH_LOOP_PROMPT_ROLE: &str = "research-loop";
 
 const ADAPTER_TOML: &str = include_str!("../adapter.toml");
@@ -60,6 +62,7 @@ Use `ldgr research <command>` for research adapter workflows after installing th
 Research adapter resources installed by `ldgr-research install`:
 
 - adapter bundle: `~/.ldgr/research` by default
+- central prompt file: `~/.ldgr/prompts/research-loop.md`
 - skill: `research-project-setup`
 - active core loop prompt: `research-loop` after `ldgr-research init`
 
@@ -258,6 +261,12 @@ fn install_bundle(install_root: &Path) -> Result<PathBuf, String> {
     write_parented(&install_root.join("adapter.toml"), ADAPTER_TOML)?;
     write_parented(&install_root.join("loop-prompt.md"), LOOP_PROMPT)?;
     write_parented(
+        &install_root
+            .join(CENTRAL_PROMPTS_DIR)
+            .join(RESEARCH_LOOP_PROMPT_FILE),
+        LOOP_PROMPT,
+    )?;
+    write_parented(
         &install_root.join("docs/research-campaign-process.md"),
         RESEARCH_CAMPAIGN_PROCESS,
     )?;
@@ -352,6 +361,7 @@ fn install_adapter_harness_resources(install_root: &Path) -> Result<(), String> 
         .ok_or_else(|| {
             "could not determine HOME/USERPROFILE for harness asset install".to_string()
         })?;
+    install_adapter_prompt_files(install_root, &home)?;
     let config = read_ldgr_harness_config(&home);
     let skill_dirs = configured_skill_dirs(&home, &config);
     let skills = install_root.join("skills");
@@ -375,6 +385,24 @@ fn install_adapter_harness_resources(install_root: &Path) -> Result<(), String> 
         RESEARCH_HARNESS_GUIDE,
     )?;
     Ok(())
+}
+
+fn install_adapter_prompt_files(install_root: &Path, home: &Path) -> Result<(), String> {
+    let prompts = install_root.join(CENTRAL_PROMPTS_DIR);
+    if !prompts.is_dir() {
+        return Ok(());
+    }
+    let target = default_prompt_root(home);
+    copy_directory_children(&prompts, &target)?;
+    println!("installed research prompts to {}", target.display());
+    Ok(())
+}
+
+fn default_prompt_root(home: &Path) -> PathBuf {
+    env::var_os("LDGR_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| home.join(".ldgr"))
+        .join(CENTRAL_PROMPTS_DIR)
 }
 
 fn read_ldgr_harness_config(home: &Path) -> Option<serde_json::Value> {
@@ -641,7 +669,8 @@ fn apply_research_prompt(
         .map_err(|error| format!("failed to initialize LDGR store: {error:#}"))?;
     let connection =
         open_store(db).map_err(|error| format!("failed to open LDGR store: {error:#}"))?;
-    let prompt_path = install_root.join("loop-prompt.md");
+    let prompt_path = installed_research_prompt_path(install_root);
+    let prompt_body = fs::read_to_string(&prompt_path).unwrap_or_else(|_| LOOP_PROMPT.to_string());
     let source_path = prompt_path.to_string_lossy();
     if get_prompt(&connection, RESEARCH_LOOP_PROMPT_SLUG)
         .map_err(|error| format!("failed to inspect existing prompt: {error:#}"))?
@@ -650,7 +679,7 @@ fn apply_research_prompt(
         update_prompt(
             &connection,
             RESEARCH_LOOP_PROMPT_SLUG,
-            LOOP_PROMPT,
+            &prompt_body,
             Some(source_path.as_ref()),
             Some("Loop prompt installed by ldgr-research."),
         )
@@ -660,7 +689,7 @@ fn apply_research_prompt(
             &connection,
             RESEARCH_LOOP_PROMPT_SLUG,
             RESEARCH_LOOP_PROMPT_ROLE,
-            LOOP_PROMPT,
+            &prompt_body,
             Some(source_path.as_ref()),
             Some("Loop prompt installed by ldgr-research."),
         )
@@ -669,6 +698,24 @@ fn apply_research_prompt(
     set_prompt_status(&connection, RESEARCH_LOOP_PROMPT_SLUG, "active")
         .map_err(|error| format!("failed to activate research prompt: {error:#}"))?;
     Ok(())
+}
+
+fn installed_research_prompt_path(install_root: &Path) -> PathBuf {
+    env::var_os("HOME")
+        .or_else(|| env::var_os("USERPROFILE"))
+        .map(PathBuf::from)
+        .map(|home| default_prompt_root(&home).join(RESEARCH_LOOP_PROMPT_FILE))
+        .filter(|path| path.is_file())
+        .unwrap_or_else(|| {
+            let bundled = install_root
+                .join(CENTRAL_PROMPTS_DIR)
+                .join(RESEARCH_LOOP_PROMPT_FILE);
+            if bundled.is_file() {
+                bundled
+            } else {
+                install_root.join("loop-prompt.md")
+            }
+        })
 }
 
 fn print_help() {

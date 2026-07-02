@@ -57,14 +57,20 @@ if [ -z "$install_root" ]; then
   install_root="$adapter_root/research"
 fi
 
-mkdir -p "$install_root/templates" "$install_root/skills" "$install_root/docs" "$install_root/scripts"
+mkdir -p "$install_root/templates" "$install_root/skills" "$install_root/docs" "$install_root/scripts" "$install_root/prompts"
 cp "$script_dir/adapter.toml" "$install_root/adapter.toml"
 cp "$script_dir/loop-prompt.md" "$install_root/loop-prompt.md"
+cp "$script_dir/loop-prompt.md" "$install_root/prompts/research-loop.md"
 cp "$script_dir/templates/"*.md "$install_root/templates/"
 cp "$script_dir/docs/"*.md "$install_root/docs/"
 cp "$script_dir/scripts/campaign_"*.sh "$install_root/scripts/"
 chmod +x "$install_root/scripts/campaign_"*.sh
 cp -R "$script_dir/skills/research-project-setup" "$install_root/skills/"
+
+prompt_root="${LDGR_HOME:-${HOME:-.}/.ldgr}/prompts"
+mkdir -p "$prompt_root"
+cp "$install_root/prompts/research-loop.md" "$prompt_root/research-loop.md"
+printf 'installed research prompts to %s\n' "$prompt_root"
 
 manifest_path="$install_root/adapter.toml"
 if [ "$print_path" -eq 1 ]; then
