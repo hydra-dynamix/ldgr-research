@@ -86,6 +86,11 @@ fn run() -> Result<(), String> {
         }
         Some("install") => install_alias(&args[1..]),
         Some("adapter") => adapter_install(&args[1..]),
+        Some("core") => pass_through_ldgr_raw(&args[1..]),
+        Some("help") if research_mode_enabled_for_args(&args) => {
+            print_help();
+            Ok(())
+        }
         Some("profile") => Err(
             "profile commands are not part of ldgr-research. Use `ldgr-research install`, `ldgr-research init`, then `ldgr research <command>`.".to_string(),
         ),
@@ -521,6 +526,8 @@ fn is_research_command(command: &str) -> bool {
         "init"
             | "context"
             | "agent-guide"
+            | "mode"
+            | "core"
             | "program"
             | "branch"
             | "experiment"
@@ -540,6 +547,7 @@ fn is_research_command(command: &str) -> bool {
             | "graph"
             | "dashboard"
             | "hypothesis"
+            | "status"
             | "tree"
             | "show"
             | "report"
@@ -553,10 +561,17 @@ fn is_research_command(command: &str) -> bool {
 }
 
 fn pass_through_ldgr(args: &[OsString]) -> Result<(), String> {
-    let ldgr_bin = env::var_os("LDGR_BIN").unwrap_or_else(|| OsString::from("ldgr"));
     let forwarded = research_adjusted_ldgr_args(args);
+    pass_through_ldgr_raw(&forwarded)
+}
+
+fn pass_through_ldgr_raw(args: &[OsString]) -> Result<(), String> {
+    if args.is_empty() {
+        return Err("core passthrough requires a core ldgr command, for example `ldgr research core status`".to_string());
+    }
+    let ldgr_bin = env::var_os("LDGR_BIN").unwrap_or_else(|| OsString::from("ldgr"));
     let status = Command::new(&ldgr_bin)
-        .args(&forwarded)
+        .args(args)
         .status()
         .map_err(|error| {
             format!(
@@ -569,11 +584,35 @@ fn pass_through_ldgr(args: &[OsString]) -> Result<(), String> {
 
 fn research_adjusted_ldgr_args(args: &[OsString]) -> Vec<OsString> {
     let mut forwarded = args.to_vec();
-    if is_loop_run(args) && !has_loop_prompt_source(args) {
+    if research_mode_enabled_for_args(args) && is_loop_run(args) && !has_loop_prompt_source(args) {
         forwarded.insert(2, OsString::from(RESEARCH_LOOP_PROMPT_SLUG));
         forwarded.insert(2, OsString::from("--prompt-slug"));
     }
     forwarded
+}
+
+fn research_mode_enabled_for_args(args: &[OsString]) -> bool {
+    let policy_path = policy_path_from_args(args)
+        .unwrap_or_else(|| PathBuf::from(crate::db::DEFAULT_POLICY_PATH));
+    crate::policy::load_policy(&policy_path)
+        .map(|policy| policy.research_mode_enabled)
+        .unwrap_or(true)
+}
+
+fn policy_path_from_args(args: &[OsString]) -> Option<PathBuf> {
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].to_str() {
+            Some("--policy") => return args.get(index + 1).map(PathBuf::from),
+            Some(value) if value.starts_with("--policy=") => {
+                return Some(PathBuf::from(value.trim_start_matches("--policy=")));
+            }
+            Some("--db") | Some("--tools") => index += 2,
+            Some(_) => index += 1,
+            None => return None,
+        }
+    }
+    None
 }
 
 fn is_loop_run(args: &[OsString]) -> bool {
@@ -634,7 +673,7 @@ fn apply_research_prompt(
 
 fn print_help() {
     println!(
-        "ldgr-research\n\nUsage:\n  ldgr-research install [OPTIONS]\n  ldgr-research adapter install [OPTIONS]\n  ldgr-research init\n  ldgr research <command> [options]\n  ldgr-research <ldgr-command> [ARGS...]\n\nAgent quickstart:\n  ldgr-research install\n  ldgr research init\n  ldgr research agent-guide\n  ldgr research doctor\n  ldgr research status\n  ldgr research context\n\nCommands:\n  install            Install the research adapter bundle and harness resources.\n  adapter install    Installer entrypoint used by LDGR core adapter install.\n  init               Initialize project research state and activate research-loop.\n  agent-guide        Print a copy-pasteable guide for autonomous agents.\n  <research-command> Run research programs, branches, options, experiments, facts, and reports.\n\nCanonical LDGR surface:\n  After install, prefer `ldgr research <command>` so core owns discovery and dispatch.\n  `ldgr-research <command>` remains available for direct use and core pass-through.\n  `ldgr-research loop run` defaults to --prompt-slug research-loop when no prompt source is supplied.\n\nNo profile step is required. The research adapter is installed with `install` and initialized with `init`."
+        "ldgr-research\n\nUsage:\n  ldgr-research install [OPTIONS]\n  ldgr-research adapter install [OPTIONS]\n  ldgr-research init\n  ldgr research <command> [options]\n  ldgr-research <ldgr-command> [ARGS...]\n\nAgent quickstart:\n  ldgr-research install\n  ldgr research init\n  ldgr research agent-guide\n  ldgr research doctor\n  ldgr research status\n  ldgr research context\n\nCommands:\n  install            Install the research adapter bundle and harness resources.\n  adapter install    Installer entrypoint used by LDGR core adapter install.\n  init               Initialize project research state and activate research-loop.\n  agent-guide        Print a copy-pasteable guide for autonomous agents.\n  mode               Enable, disable, or inspect the project research overlay.\n  core <command>     Run a core ldgr command through the research surface.\n  <research-command> Run research programs, branches, options, experiments, facts, and reports.\n\nCanonical LDGR surface:\n  After install, prefer `ldgr research <command>` so core owns discovery and dispatch.\n  `ldgr-research <command>` remains available for direct use and core pass-through.\n  `ldgr-research loop run` defaults to --prompt-slug research-loop when research mode is enabled and no prompt source is supplied.\n  `ldgr research core <ldgr-command>` is the escape hatch for conflicting core commands such as core run/artifact/decision.\n\nNo profile step is required. The research adapter is installed with `install` and initialized with `init`."
     );
 }
 

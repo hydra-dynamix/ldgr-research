@@ -45,6 +45,8 @@ fn help_documents_agent_first_adapter_surface() -> anyhow::Result<()> {
     command.assert().success().stdout(
         predicate::str::contains("Agent quickstart")
             .and(predicate::str::contains("ldgr research agent-guide"))
+            .and(predicate::str::contains("mode"))
+            .and(predicate::str::contains("core <command>"))
             .and(predicate::str::contains("Canonical LDGR surface"))
             .and(predicate::str::contains("No profile step is required"))
             .and(predicate::str::contains("profile discover/apply").not()),
@@ -245,6 +247,8 @@ fn agent_guide_documents_copy_pasteable_canonical_flow() -> anyhow::Result<()> {
             .and(predicate::str::contains("ldgr research question add"))
             .and(predicate::str::contains("ldgr research option add"))
             .and(predicate::str::contains("ldgr research experiment create"))
+            .and(predicate::str::contains("ldgr research core run close"))
+            .and(predicate::str::contains("ldgr research mode disable"))
             .and(predicate::str::contains("profile/discover/apply").not()),
     );
     Ok(())
@@ -589,7 +593,7 @@ fn research_primitives_complete_happy_path_end_to_end() -> anyhow::Result<()> {
 }
 
 #[test]
-fn unknown_commands_pass_through_to_ldgr() -> anyhow::Result<()> {
+fn non_conflicting_core_commands_pass_through_to_ldgr() -> anyhow::Result<()> {
     let temp = TempDir::new()?;
     let fake_ldgr = temp.path().join("fake-ldgr.sh");
     let args_log = temp.path().join("args.txt");
@@ -605,14 +609,96 @@ fn unknown_commands_pass_through_to_ldgr() -> anyhow::Result<()> {
     let mut command = research_command()?;
     command
         .env("LDGR_BIN", &fake_ldgr)
-        .args(["status", "--json"]);
+        .args(["observation", "add", "7", "--body", "evidence"]);
     command
         .assert()
         .success()
         .stdout(predicate::str::contains("passed-through"));
 
     let args = fs::read_to_string(args_log)?;
-    assert_eq!(args.trim(), "status --json");
+    assert_eq!(args.trim(), "observation add 7 --body evidence");
+    Ok(())
+}
+
+#[test]
+fn core_escape_hatch_passes_conflicting_commands_to_ldgr() -> anyhow::Result<()> {
+    let temp = TempDir::new()?;
+    let fake_ldgr = temp.path().join("fake-ldgr.sh");
+    let args_log = temp.path().join("args.txt");
+    fs::write(
+        &fake_ldgr,
+        format!(
+            "#!/usr/bin/env bash\nprintf '%s\n' \"$*\" > {}\necho core-pass-through\n",
+            args_log.display()
+        ),
+    )?;
+    make_executable(&fake_ldgr)?;
+
+    research_command()?
+        .env("LDGR_BIN", &fake_ldgr)
+        .args(["core", "run", "close", "7", "--status", "success"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("core-pass-through"));
+
+    let args = fs::read_to_string(args_log)?;
+    assert_eq!(args.trim(), "run close 7 --status success");
+    Ok(())
+}
+
+#[test]
+fn mode_disable_stops_research_loop_prompt_injection() -> anyhow::Result<()> {
+    let temp = TempDir::new()?;
+    let fake_ldgr = temp.path().join("fake-ldgr.sh");
+    let args_log = temp.path().join("args.txt");
+    fs::write(
+        &fake_ldgr,
+        format!(
+            "#!/usr/bin/env bash\nprintf '%s\n' \"$*\" > {}\necho loop-pass-through\n",
+            args_log.display()
+        ),
+    )?;
+    make_executable(&fake_ldgr)?;
+
+    run_research(temp.path(), &["init"])?;
+    run_research(temp.path(), &["mode", "disable"])?;
+
+    research_command()?
+        .current_dir(temp.path())
+        .env("LDGR_BIN", &fake_ldgr)
+        .args(["loop", "run", "--dry-run"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("loop-pass-through"));
+
+    let args = fs::read_to_string(args_log)?;
+    assert_eq!(args.trim(), "loop run --dry-run");
+    Ok(())
+}
+
+#[test]
+fn status_includes_core_and_research_sections() -> anyhow::Result<()> {
+    let temp = TempDir::new()?;
+    let fake_ldgr = temp.path().join("fake-ldgr.sh");
+    fs::write(
+        &fake_ldgr,
+        "#!/usr/bin/env bash\necho core-status-from-fake\n",
+    )?;
+    make_executable(&fake_ldgr)?;
+
+    run_research(temp.path(), &["init"])?;
+    research_command()?
+        .current_dir(temp.path())
+        .env("LDGR_BIN", &fake_ldgr)
+        .arg("status")
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("LDGR Research status")
+                .and(predicate::str::contains("Core LDGR status"))
+                .and(predicate::str::contains("core-status-from-fake"))
+                .and(predicate::str::contains("Research status")),
+        );
     Ok(())
 }
 

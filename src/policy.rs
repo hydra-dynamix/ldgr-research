@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 
 pub const STARTER_POLICY: &str = r#"current_program:
 current_branch:
+research_mode_enabled: true
 required_context_before_work: true
 required_decision_after_experiment: true
 require_human_approval_for_blocked_overrides: true
@@ -44,6 +45,8 @@ pub struct Policy {
     pub current_program: Option<String>,
     #[serde(default)]
     pub current_branch: Option<String>,
+    #[serde(default = "default_true")]
+    pub research_mode_enabled: bool,
     #[serde(default)]
     pub required_context_before_work: bool,
     #[serde(default)]
@@ -76,6 +79,10 @@ pub struct ReviewThresholds {
 pub struct RecommendationPolicy {
     #[serde(default)]
     pub prefer_classifications: Vec<String>,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 pub fn write_starter_policy_if_missing(path: &Path) -> anyhow::Result<bool> {
@@ -133,6 +140,13 @@ pub fn set_current_program(path: &Path, slug: &str) -> anyhow::Result<Policy> {
 pub fn set_current_branch(path: &Path, slug: &str) -> anyhow::Result<Policy> {
     let mut policy = load_policy(path)?;
     policy.current_branch = Some(slug.to_owned());
+    save_policy(path, &policy)?;
+    Ok(policy)
+}
+
+pub fn set_research_mode(path: &Path, enabled: bool) -> anyhow::Result<Policy> {
+    let mut policy = load_policy(path)?;
+    policy.research_mode_enabled = enabled;
     save_policy(path, &policy)?;
     Ok(policy)
 }

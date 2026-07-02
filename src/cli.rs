@@ -1,9 +1,12 @@
 #![allow(clippy::large_enum_variant)]
 
 use std::collections::BTreeMap;
+use std::env;
+use std::ffi::OsString;
 use std::fs;
 use std::io::Read;
 use std::path::{Component, Path, PathBuf};
+use std::process::Command as ProcessCommand;
 use std::str::FromStr;
 
 use anyhow::{bail, Context};
@@ -51,6 +54,10 @@ pub enum Command {
     Context,
     /// Print a copy-pasteable guide for autonomous agents using ldgr-research.
     AgentGuide,
+    /// Enable, disable, or inspect the project research overlay.
+    Mode(ModeArgs),
+    /// Run a core ldgr command through the research surface.
+    Core(CoreArgs),
     /// Manage research programs.
     Program(ProgramArgs),
     /// Manage research branches.
@@ -118,6 +125,8 @@ pub fn run() -> anyhow::Result<()> {
         Command::Init => init_project(&cli.db, &cli.policy, &cli.tools),
         Command::Context => handle_context(&cli.db, &cli.policy, cli.enable_graph_reasoning),
         Command::AgentGuide => handle_agent_guide(),
+        Command::Mode(args) => handle_mode(&cli.policy, args),
+        Command::Core(args) => pass_through_core(&args.argv),
         Command::Program(args) => handle_program(&cli.db, &cli.policy, args),
         Command::Branch(args) => handle_branch(&cli.db, &cli.policy, args),
         Command::Experiment(args) => handle_experiment(&cli.db, &cli.policy, args),
@@ -143,7 +152,7 @@ pub fn run() -> anyhow::Result<()> {
             ensure_hypothesis_engine_enabled(cli.enable_hypothesis_engine)?;
             handle_hypothesis(&cli.db, &cli.policy, cli.enable_graph_reasoning, args)
         }
-        Command::Status => handle_status(&cli.db),
+        Command::Status => handle_status(&cli.db, &cli.policy),
         Command::Tree(args) => handle_tree(&cli.db, args),
         Command::Show(args) => handle_show(&cli.db, &cli.policy, args),
         Command::Report(args) => handle_report(&cli.db, &cli.policy, args),
@@ -211,9 +220,157 @@ fn safe_relative_directory(path: &Path) -> bool {
             .all(|component| matches!(component, Component::Normal(_) | Component::CurDir))
 }
 
+fn handle_mode(policy: &Path, args: ModeArgs) -> anyhow::Result<()> {
+    match args.command {
+        ModeCommand::Enable => {
+            let policy_doc = crate::policy::set_research_mode(policy, true)?;
+            println!("research mode: enabled");
+            print_mode_next_steps(&policy_doc);
+        }
+        ModeCommand::Disable => {
+            crate::policy::set_research_mode(policy, false)?;
+            println!("research mode: disabled");
+            println!("core commands remain available through `ldgr research core <command>` or `ldgr <command>`");
+        }
+        ModeCommand::Status => {
+            let policy_doc = crate::policy::load_policy(policy)?;
+            if policy_doc.research_mode_enabled {
+                println!("research mode: enabled");
+            } else {
+                println!("research mode: disabled");
+            }
+            print_mode_next_steps(&policy_doc);
+        }
+    }
+    Ok(())
+}
+
+fn print_mode_next_steps(policy_doc: &crate::policy::Policy) {
+    if policy_doc.research_mode_enabled {
+        println!("research overlay commands are active: status/context/loop use research defaults");
+        println!("core passthrough: `ldgr research core <ldgr-command>`");
+    }
+}
+
+fn pass_through_core(args: &[OsString]) -> anyhow::Result<()> {
+    if args.is_empty() {
+        bail!("core passthrough requires a core ldgr command, for example `ldgr research core status`");
+    }
+    let ldgr_bin = env::var_os("LDGR_BIN").unwrap_or_else(|| OsString::from("ldgr"));
+    let status = ProcessCommand::new(&ldgr_bin)
+        .args(args)
+        .status()
+        .with_context(|| format!("failed to run {}", PathBuf::from(&ldgr_bin).display()))?;
+    std::process::exit(status.code().unwrap_or(1));
+}
+
+fn capture_core_command(args: &[&str]) -> anyhow::Result<String> {
+    let ldgr_bin = env::var_os("LDGR_BIN").unwrap_or_else(|| OsString::from("ldgr"));
+    let output = ProcessCommand::new(&ldgr_bin)
+        .args(args)
+        .output()
+        .with_context(|| format!("failed to run {}", PathBuf::from(&ldgr_bin).display()))?;
+    let mut text = String::new();
+    text.push_str(&String::from_utf8_lossy(&output.stdout));
+    text.push_str(&String::from_utf8_lossy(&output.stderr));
+    if !output.status.success() && text.trim().is_empty() {
+        text.push_str(&format!(
+            "core ldgr command exited with status {}",
+            output.status
+        ));
+    }
+    Ok(text)
+}
+
+fn print_core_capture(command: &str) -> anyhow::Result<()> {
+    match capture_core_command(&[command]) {
+        Ok(text) if !text.trim().is_empty() => print_indented(&text),
+        Ok(_) => println!("  core ldgr {command} produced no output"),
+        Err(error) => println!("  core ldgr {command} unavailable: {error:#}"),
+    }
+    Ok(())
+}
+
+fn print_indented(text: &str) {
+    for line in text.lines() {
+        println!("  {line}");
+    }
+}
+
 fn handle_agent_guide() -> anyhow::Result<()> {
     println!(
-        "# LDGR Research agent guide\n\nRun these commands from the project root. Prefer the canonical core dispatch form: `ldgr research <command>`.\n\n## First use in a project\n\n```sh\nldgr research init\nldgr research doctor\nldgr research status\nldgr research context\n```\n\n## Create an initial research spine\n\n```sh\nldgr research program create <program-slug> --title \"<title>\" --objective \"<objective>\"\nldgr research program set-current <program-slug>\nldgr research branch create main --program <program-slug> --title \"Main\" --question \"<question>\" --rationale \"<why this branch>\"\nldgr research branch set-current main\nldgr research question add <question-slug> --program <program-slug> --branch main --question \"<open question>\"\nldgr research option add <option-slug> --program <program-slug> --branch main --question <question-slug> --classification main_path --description \"<candidate answer or plan>\"\nldgr research experiment create first-check --branch main --option <option-slug> --mode exploration --title \"First check\" --hypothesis \"<what should be true>\" --setup \"<validation command or evidence-gathering step>\" --observation-goal \"<what to observe>\"\n```\n\n## Evidence and checks\n\n```sh\nldgr research fact add <fact-slug> --program <program-slug> --statement \"<evidence-backed fact>\" --status candidate --evidence-report \"<artifact, command, paper, or observation>\"\nldgr research guard\nldgr research lint\n```\n\n## Agent loop\n\n```sh\nldgr research loop run --dry-run\nldgr research loop run\n```\n\nRules for agents:\n- run `doctor`, `status`, and `context` before making changes;\n- record evidence as facts/artifacts/metrics before decisions;\n- keep LDGR core records authoritative;\n- install/init are the only adapter setup steps.\n"
+        r#"# LDGR Research agent guide
+
+Run these commands from the project root. Prefer the canonical core dispatch form: `ldgr research <command>`.
+
+## First use in a project
+
+```sh
+ldgr research init
+ldgr research doctor
+ldgr research status
+ldgr research context
+```
+
+## Create an initial research spine
+
+```sh
+ldgr research program create <program-slug> --title "<title>" --objective "<objective>"
+ldgr research program set-current <program-slug>
+ldgr research branch create main --program <program-slug> --title "Main" --question "<question>" --rationale "<why this branch>"
+ldgr research branch set-current main
+ldgr research question add <question-slug> --program <program-slug> --branch main --question "<open question>"
+ldgr research option add <option-slug> --program <program-slug> --branch main --question <question-slug> --classification main_path --description "<candidate answer or plan>"
+ldgr research experiment create first-check --branch main --option <option-slug> --mode exploration --title "First check" --hypothesis "<what should be true>" --setup "<validation command or evidence-gathering step>" --observation-goal "<what to observe>"
+```
+
+## Evidence and checks
+
+```sh
+ldgr research fact add <fact-slug> --program <program-slug> --statement "<evidence-backed fact>" --status candidate --evidence-report "<artifact, command, paper, or observation>"
+ldgr research guard
+ldgr research lint
+```
+
+## Core records through the research surface
+
+Most core commands that do not conflict with research command names pass through directly:
+
+```sh
+ldgr research observation add <run-id> --body "<evidence>"
+ldgr research validation record <run-id> --outcome pass --command "<command>" --rationale "<why>"
+ldgr research work create <slug> --title "<title>" --description "<bounded next work>"
+```
+
+For names that conflict with research primitives, use the explicit core escape hatch:
+
+```sh
+ldgr research core run close <run-id> --status success --outcome continue --rationale "<why>" --next-slug <slug>
+ldgr research core artifact add <run-id> --kind report --path <path> --description "<description>"
+ldgr research core decision --help
+```
+
+## Research mode
+
+```sh
+ldgr research mode status
+ldgr research mode disable  # status/context/loop stop using research defaults
+ldgr research mode enable
+```
+
+## Agent loop
+
+```sh
+ldgr research loop run --dry-run
+ldgr research loop run
+```
+
+Rules for agents:
+- run `doctor`, `status`, and `context` before making changes;
+- record evidence through `ldgr research observation` / `ldgr research validation` and use `ldgr research core` for conflicting core commands;
+- keep LDGR core records authoritative;
+- install/init are the only adapter setup steps.
+"#
     );
     Ok(())
 }
@@ -376,8 +533,24 @@ fn ensure_hypothesis_engine_enabled(enabled: bool) -> anyhow::Result<()> {
 
 fn handle_context(db: &Path, policy: &Path, enable_graph_reasoning: bool) -> anyhow::Result<()> {
     let policy_doc = crate::policy::load_policy(policy)?;
+    if !policy_doc.research_mode_enabled {
+        println!("LDGR Research context");
+        println!("research mode: disabled");
+        println!("\nCore LDGR context/status:");
+        print_core_capture("status")?;
+        println!("\nnext: `ldgr research mode enable` to restore research overlay defaults");
+        return Ok(());
+    }
     let conn = crate::db::open_database(db)?;
 
+    println!("LDGR Research context");
+    println!("research mode: enabled");
+    println!();
+    println!("Core LDGR status:");
+    print_core_capture("status")?;
+    println!();
+    println!("Research cockpit:");
+    println!();
     println!("Current Program:");
     let current_program = match policy_doc.current_program.as_deref() {
         Some(slug) => match crate::db::get_program_by_slug(&conn, slug)? {
@@ -2138,7 +2311,25 @@ fn print_evidence(
     Ok(())
 }
 
-fn handle_status(db: &Path) -> anyhow::Result<()> {
+fn handle_status(db: &Path, policy: &Path) -> anyhow::Result<()> {
+    let policy_doc = crate::policy::load_policy(policy)?;
+    println!("LDGR Research status");
+    if !policy_doc.research_mode_enabled {
+        println!("research mode: disabled");
+        println!();
+        println!("Core LDGR status:");
+        print_core_capture("status")?;
+        println!();
+        println!("next: `ldgr research mode enable` to restore research overlay defaults");
+        return Ok(());
+    }
+
+    println!("research mode: enabled");
+    println!();
+    println!("Core LDGR status:");
+    print_core_capture("status")?;
+    println!();
+    println!("Research status:");
     let conn = crate::db::open_database(db)?;
     print!("{}", crate::reports::render_status(&conn)?);
     Ok(())
@@ -3648,6 +3839,25 @@ fn print_list_or_none(items: &[String]) {
             println!("- {item}");
         }
     }
+}
+
+#[derive(Debug, Args)]
+pub struct ModeArgs {
+    #[command(subcommand)]
+    pub command: ModeCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ModeCommand {
+    Enable,
+    Disable,
+    Status,
+}
+
+#[derive(Debug, Args)]
+pub struct CoreArgs {
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true, required = true)]
+    pub argv: Vec<OsString>,
 }
 
 #[derive(Debug, Args)]

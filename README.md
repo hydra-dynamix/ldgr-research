@@ -1,9 +1,11 @@
 # ldgr-research
 
-`ldgr-research` is the research adapter for LDGR. It provides one command surface for two things:
+`ldgr-research` is the alpha research adapter for LDGR. It provides one command surface for two things:
 
 - research-specific records stored in `.ldgr/research/research.db`; and
-- pass-through access to core `ldgr` commands such as `status`, `work`, `run`, and `loop`.
+- research-oriented access to core `ldgr` commands such as `status`, `work`, `run`, and `loop`.
+
+The adapter is publication-ready as an alpha: workflows and schemas may still evolve, but the canonical install/init/loop path is intended to be usable by agents and humans.
 
 The research layer uses a proven workflow: programs contain branches, branches contain selectable research options/hypotheses, and selected options become bounded experiments with runs, metrics, artifacts, decisions, facts, and follow-up options.
 
@@ -25,7 +27,32 @@ ldgr research loop run
 
 This follows the `ldgr-conduct` adapter pattern: the adapter binary owns install/init/resources/workflows, while LDGR core owns adapter discovery and dispatch through `adapter.toml`. `ldgr-research adapter install` is the installer entrypoint used by LDGR core; humans can run `ldgr-research install`.
 
-`ldgr-research init` initializes project research state, materializes the adapter bundle/harness resources when needed, and installs/activates the core `research-loop` prompt. `ldgr-research loop run` and `ldgr research loop run` forward to `ldgr loop run` and automatically supply `--prompt-slug research-loop` when no prompt source is provided.
+`ldgr-research init` initializes project research state, materializes the adapter bundle/harness resources when needed, and installs/activates the core `research-loop` prompt. `ldgr-research loop run` and `ldgr research loop run` forward to `ldgr loop run` and automatically supply `--prompt-slug research-loop` when research mode is enabled and no prompt source is provided.
+
+## Research overlay mode
+
+Research mode is enabled by default after `init`. In research mode, `ldgr research status` and `ldgr research context` show research-focused menus with core LDGR status embedded, and `ldgr research loop run` uses the active `research-loop` prompt by default.
+
+```sh
+ldgr research mode status
+ldgr research mode disable  # stop using research defaults in this project
+ldgr research mode enable
+```
+
+Most non-conflicting core commands can be run through the same surface:
+
+```sh
+ldgr research observation add <run-id> --body "<evidence>"
+ldgr research validation record <run-id> --outcome pass --command "<command>" --rationale "<why>"
+ldgr research work create <slug> --title "<title>" --description "<bounded next work>"
+```
+
+For command names that conflict with research primitives (`run`, `artifact`, `decision`), use the explicit core escape hatch:
+
+```sh
+ldgr research core run close <run-id> --status success --outcome continue --rationale "<why>"
+ldgr research core artifact add <run-id> --kind report --path <path> --description "<description>"
+```
 
 ## Agent quickstart
 
@@ -39,7 +66,7 @@ ldgr research status
 ldgr research context
 ```
 
-`agent-guide` prints copy-pasteable commands for creating the initial program/branch/question/option spine and for running guard/lint checks.
+`agent-guide` prints copy-pasteable commands for creating the initial program/branch/question/option spine, recording core evidence through the research surface, using `ldgr research core` for conflicting core commands, and running guard/lint checks.
 
 ## State layout
 
@@ -159,16 +186,28 @@ Use `ldgr-research <command> --help` for exact flags.
 Any non-research command is forwarded to `ldgr`:
 
 ```sh
-ldgr-research status
+ldgr-research observation add 7 --body "Evidence from this run"
+ldgr-research validation record 7 --outcome pass --command "cargo test" --rationale "Tests passed"
 ldgr-research work create next-hypothesis --title "Next hypothesis" --description "..."
 ldgr-research loop run --max-iterations 3
 ```
 
-For loop runs, `ldgr-research` injects the active research prompt by default:
+For conflicting command names, use the explicit core escape hatch:
+
+```sh
+ldgr-research core run close 7 --status success --outcome continue --rationale "..."
+ldgr-research core artifact add 7 --kind report --path output.txt --description "Transcript"
+```
+
+For loop runs, `ldgr-research` injects the active research prompt by default when research mode is enabled:
 
 ```sh
 ldgr-research loop run
 # forwards to: ldgr loop run --prompt-slug research-loop
+
+ldgr-research mode disable
+ldgr-research loop run
+# forwards to: ldgr loop run
 ```
 
 Explicit prompt sources are preserved:
@@ -186,6 +225,8 @@ ldgr-research adapter install [--adapter-root DIR | --install-root DIR] [--print
 ldgr-research init
 ldgr research <command> [options]
 ldgr research agent-guide
+ldgr research mode <status|enable|disable>
+ldgr research core <ldgr-command>
 ```
 
 By default, adapter bundle files are materialized under `LDGR_HOME/research` or `~/.ldgr/research`. Install copies adapter-owned skills into configured harness skill paths from `~/.ldgr/config.json`, defaulting to `~/.pi/agent/skills` when no harness config is present.
