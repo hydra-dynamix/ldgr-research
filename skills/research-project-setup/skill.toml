@@ -1,7 +1,7 @@
 version = "0.1.0"
 category = "onboarding"
-tags = ["ldgr", "adapter", "onboarding", "project-setup"]
-activation = ["onboard project", "set up project", "initialize adapter", "prepare first work"]
+tags = ["ldgr", "research", "adapter", "onboarding", "project-setup", "program-setup"]
+activation = ["onboard project", "set up research project", "initialize research adapter", "create research program", "prepare first work"]
 
 [[inputs]]
 name = "setup_request"
@@ -20,6 +20,11 @@ required = true
 
 [[outputs]]
 name = "setup_observations"
+type = "ldgr-records"
+required = true
+
+[[outputs]]
+name = "research_spine"
 type = "ldgr-records"
 required = true
 
