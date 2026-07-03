@@ -1,0 +1,19 @@
+{
+  "hypothesis": "One testable claim or objective for this cycle.",
+  "changed": [
+    "Files, commands, datasets, or surfaces changed/inspected. Keep concise."
+  ],
+  "commands": [
+    {
+      "command": "command that produced evidence",
+      "outcome": "pass|fail|error|skipped",
+      "artifact": "optional artifact path or id"
+    }
+  ],
+  "metrics": {},
+  "pass_criteria": {},
+  "outcome": "supported|weakened|falsified|inconclusive|blocked",
+  "claim_delta": "none|supported:<claim>|weakened:<claim>|falsified:<claim>|new_candidate:<claim>|external_validity_shift:<claim>",
+  "artifacts": [],
+  "next_work": "Next bounded hypothesis/direction, or null if none."
+}

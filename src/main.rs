@@ -43,6 +43,7 @@ const EXPERIMENT_PLAN: &str = include_str!("../templates/experiment-plan.md");
 const MILESTONES: &str = include_str!("../templates/milestones.md");
 const NEGATIVE_RESULT: &str = include_str!("../templates/negative-result.md");
 const RESEARCH_SPEC: &str = include_str!("../templates/research-spec.md");
+const RUN_SUMMARY: &str = include_str!("../templates/run-summary.json");
 const SETUP_SKILL: &str = include_str!("../skills/research-project-setup/SKILL.md");
 const SETUP_SKILL_TOML: &str = include_str!("../skills/research-project-setup/skill.toml");
 const SETUP_PROMPT_ARTIFACT: &str =
@@ -322,6 +323,10 @@ fn install_bundle(install_root: &Path) -> Result<PathBuf, String> {
     write_parented(
         &install_root.join("templates/research-spec.md"),
         RESEARCH_SPEC,
+    )?;
+    write_parented(
+        &install_root.join("templates/run-summary.json"),
+        RUN_SUMMARY,
     )?;
     write_parented(
         &install_root.join("skills/research-project-setup/SKILL.md"),

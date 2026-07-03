@@ -45,8 +45,8 @@ ldgr research core artifact add <run-id> --kind report --path <path> --descripti
 5. **Create the research program spine.** Create/select exactly one initial program, branch, open question, and option/hypothesis that match the setup request. Keep names stable and slug-like.
 6. **Create a bounded first experiment when the first hypothesis is known.** Use `ldgr research experiment create ...` for the narrow first test. Prefer exploration mode when the desired observation is not a strict falsification criterion yet.
 7. **Queue exactly one loop work item.** The loop consumes core LDGR work, so create one matching core work item via `ldgr research work create ...`. Reference the research program/branch/question/option/experiment slugs in the description.
-8. **Record setup validations.** Record `doctor`, `status`, `context`, and any target inventory/check commands with `ldgr research validation record`.
-9. **Summarize handoff.** Report created research slugs, core work slug, artifacts/observations/validations, current research mode, and the recommended next command (usually `ldgr research loop run --max-iterations 1`).
+8. **Record setup validations.** Record `doctor`, `status`, `context`, and any target inventory/check commands with `ldgr research validation record`. Keep rationales compact; do not duplicate command output already captured in artifacts.
+9. **Summarize handoff.** Report created research slugs, core work slug, artifacts/observations/validations, current research mode, and the recommended next command (usually `ldgr research loop run --max-iterations 1`). Keep the handoff concise and avoid a full narrative report unless setup changed claims or uncovered a surprising blocker.
 
 ## Initial research spine template
 
@@ -97,6 +97,8 @@ If the first experiment is not yet clear, stop after the question/option and cre
 ## Adapter focus
 
 Research projects should preserve hypotheses, claims, evidence, open questions, and experiment plans. Favor evidence-linked facts and explicit rejected/unknown claims over broad prose summaries. Keep core LDGR records authoritative for execution history; use research records as the semantic overlay.
+
+Routine research cycles should be thin and machine-summarizable: one compact `run_summary.json`-style artifact, validation records, a concise decision, and one next work item when needed. Reserve full prose reports for promotion points such as claim graph changes, surprising negative results, operator/model/policy promotion or demotion, external-validity shifts, or milestone synthesis. The goal is to maximize continuity per token/minute.
 
 ## Useful commands
 
