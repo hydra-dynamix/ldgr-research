@@ -10,15 +10,18 @@ mod reports;
 mod schema;
 mod tools;
 
+use ldgr::adapter_command::{
+    default_adapter_root, parse_adapter_install_command, pass_through_ldgr_or_exit,
+    AdapterInstallCommand,
+};
+use ldgr::adapter_profile::{apply_adapter_profile_prompt, AdapterProfileApplyOptions};
+use ldgr::adapter_registry::{
+    adapter_manifest_paths, AdapterDiscoveryEnvironment, LDGR_ADAPTER_PATH_ENV,
+};
 use std::env;
 use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
-
-use ldgr::store::{
-    create_prompt, get_prompt, init_store, open_store, set_prompt_status, update_prompt,
-};
 
 const RESEARCH_LOOP_PROMPT_SLUG: &str = "research-loop";
 const ADAPTER_INSTALL_DIR: &str = "research";
@@ -128,35 +131,17 @@ fn adapter_install(args: &[OsString]) -> Result<(), String> {
 }
 
 fn install_adapter_bundle_from_options(args: &[OsString]) -> Result<(), String> {
-    let mut install_root = default_adapter_root().join(ADAPTER_INSTALL_DIR);
-    let mut print_path = false;
-    let mut index = 0;
-    while index < args.len() {
-        match args[index].to_str() {
-            Some("--adapter-root") => {
-                install_root = next_path(args, index, "--adapter-root")?.join(ADAPTER_INSTALL_DIR);
-                index += 2;
-            }
-            Some("--install-root") => {
-                install_root = next_path(args, index, "--install-root")?;
-                index += 2;
-            }
-            Some("--print-path") => {
-                print_path = true;
-                index += 1;
-            }
-            Some("--help") | Some("-h") => {
-                print_adapter_install_help();
-                return Ok(());
-            }
-            Some(flag) => return Err(format!("unknown adapter install option `{flag}`")),
-            None => return Err("adapter install arguments must be valid UTF-8".to_string()),
+    let options = match parse_adapter_install_command(args.iter().cloned(), ADAPTER_INSTALL_DIR)? {
+        AdapterInstallCommand::Help => {
+            print_adapter_install_help();
+            return Ok(());
         }
-    }
+        AdapterInstallCommand::Install(options) => options,
+    };
 
-    let manifest_path = install_bundle(&install_root)?;
-    install_adapter_harness_resources(&install_root)?;
-    if print_path {
+    let manifest_path = install_bundle(&options.install_root)?;
+    install_adapter_harness_resources(&options.install_root)?;
+    if options.print_path {
         println!("{}", manifest_path.display());
     } else {
         println!(
@@ -212,23 +197,6 @@ fn has_help_flag(args: &[OsString]) -> bool {
         .any(|arg| matches!(arg.to_str(), Some("--help") | Some("-h")))
 }
 
-fn next_path(args: &[OsString], index: usize, flag: &str) -> Result<PathBuf, String> {
-    args.get(index + 1)
-        .map(PathBuf::from)
-        .ok_or_else(|| format!("{flag} requires a path"))
-}
-
-fn default_adapter_root() -> PathBuf {
-    env::var_os("LDGR_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            env::var_os("HOME")
-                .map(PathBuf::from)
-                .unwrap_or_else(|| PathBuf::from("."))
-                .join(".ldgr")
-        })
-}
-
 fn init_adapter_install_root() -> (PathBuf, bool) {
     if let Some(root) = discover_research_adapter_root_from_env() {
         (root, true)
@@ -238,24 +206,31 @@ fn init_adapter_install_root() -> (PathBuf, bool) {
 }
 
 fn discover_research_adapter_root_from_env() -> Option<PathBuf> {
-    let paths = env::var_os("LDGR_ADAPTER_PATH")?;
-    for root in env::split_paths(&paths) {
-        if is_research_adapter_root(&root) {
-            return Some(root);
-        }
-        let child = root.join(ADAPTER_INSTALL_DIR);
-        if is_research_adapter_root(&child) {
-            return Some(child);
+    let env = AdapterDiscoveryEnvironment {
+        adapter_path: env::var_os(LDGR_ADAPTER_PATH_ENV),
+        ldgr_home: None,
+        home: None,
+        include_project_root: false,
+    };
+    let mut warnings = Vec::new();
+    for root in env.adapter_search_roots() {
+        for manifest_path in adapter_manifest_paths(&root, &mut warnings) {
+            if fs::read_to_string(&manifest_path)
+                .map(|text| text.contains("slug = \"research\""))
+                .unwrap_or(false)
+            {
+                return manifest_path.parent().map(Path::to_path_buf);
+            }
         }
     }
+    for warning in warnings {
+        eprintln!(
+            "warning: skipped adapter manifest {}: {}",
+            warning.manifest_path.display(),
+            warning.message
+        );
+    }
     None
-}
-
-fn is_research_adapter_root(root: &Path) -> bool {
-    let manifest = root.join("adapter.toml");
-    fs::read_to_string(manifest)
-        .map(|text| text.contains("slug = \"research\""))
-        .unwrap_or(false)
 }
 
 fn install_bundle(install_root: &Path) -> Result<PathBuf, String> {
@@ -599,20 +574,10 @@ fn pass_through_ldgr(args: &[OsString]) -> Result<(), String> {
 }
 
 fn pass_through_ldgr_raw(args: &[OsString]) -> Result<(), String> {
-    if args.is_empty() {
-        return Err("core passthrough requires a core ldgr command, for example `ldgr research core status`".to_string());
-    }
-    let ldgr_bin = env::var_os("LDGR_BIN").unwrap_or_else(|| OsString::from("ldgr"));
-    let status = Command::new(&ldgr_bin)
-        .args(args)
-        .status()
-        .map_err(|error| {
-            format!(
-                "failed to run {}: {error}",
-                PathBuf::from(&ldgr_bin).display()
-            )
-        })?;
-    std::process::exit(status.code().unwrap_or(1));
+    pass_through_ldgr_or_exit(
+        args,
+        "core passthrough requires a core ldgr command, for example `ldgr research core status`",
+    )
 }
 
 fn research_adjusted_ldgr_args(args: &[OsString]) -> Vec<OsString> {
@@ -670,57 +635,31 @@ fn apply_research_prompt(
     artifact_root: &Path,
     install_root: &Path,
 ) -> Result<(), String> {
-    init_store(db, artifact_root)
-        .map_err(|error| format!("failed to initialize LDGR store: {error:#}"))?;
-    let connection =
-        open_store(db).map_err(|error| format!("failed to open LDGR store: {error:#}"))?;
-    let prompt_path = installed_research_prompt_path(install_root);
-    let prompt_body = fs::read_to_string(&prompt_path).unwrap_or_else(|_| LOOP_PROMPT.to_string());
-    let source_path = prompt_path.to_string_lossy();
-    if get_prompt(&connection, RESEARCH_LOOP_PROMPT_SLUG)
-        .map_err(|error| format!("failed to inspect existing prompt: {error:#}"))?
-        .is_some()
-    {
-        update_prompt(
-            &connection,
-            RESEARCH_LOOP_PROMPT_SLUG,
-            &prompt_body,
-            Some(source_path.as_ref()),
-            Some("Loop prompt installed by ldgr-research."),
-        )
-        .map_err(|error| format!("failed to update research prompt: {error:#}"))?;
+    let manifest_path = if install_root.join("adapter.toml").is_file() {
+        install_root.join("adapter.toml")
     } else {
-        create_prompt(
-            &connection,
-            RESEARCH_LOOP_PROMPT_SLUG,
-            RESEARCH_LOOP_PROMPT_ROLE,
-            &prompt_body,
-            Some(source_path.as_ref()),
-            Some("Loop prompt installed by ldgr-research."),
-        )
-        .map_err(|error| format!("failed to create research prompt: {error:#}"))?;
-    }
-    set_prompt_status(&connection, RESEARCH_LOOP_PROMPT_SLUG, "active")
-        .map_err(|error| format!("failed to activate research prompt: {error:#}"))?;
+        let fallback_root = db
+            .parent()
+            .unwrap_or_else(|| Path::new(".ldgr"))
+            .join("adapter-profile-cache")
+            .join(ADAPTER_INSTALL_DIR);
+        install_bundle(&fallback_root).map_err(|error| {
+            format!(
+                "failed to prepare fallback research adapter profile at {}: {error}",
+                fallback_root.display()
+            )
+        })?
+    };
+    apply_adapter_profile_prompt(AdapterProfileApplyOptions {
+        manifest_path: &manifest_path,
+        db_path: db,
+        artifact_root,
+        prompt_slug: RESEARCH_LOOP_PROMPT_SLUG,
+        prompt_role: RESEARCH_LOOP_PROMPT_ROLE,
+        description: Some("Loop prompt installed by ldgr-research."),
+    })
+    .map_err(|error| format!("failed to apply research adapter profile: {error:#}"))?;
     Ok(())
-}
-
-fn installed_research_prompt_path(install_root: &Path) -> PathBuf {
-    env::var_os("HOME")
-        .or_else(|| env::var_os("USERPROFILE"))
-        .map(PathBuf::from)
-        .map(|home| default_prompt_root(&home).join(RESEARCH_LOOP_PROMPT_FILE))
-        .filter(|path| path.is_file())
-        .unwrap_or_else(|| {
-            let bundled = install_root
-                .join(CENTRAL_PROMPTS_DIR)
-                .join(RESEARCH_LOOP_PROMPT_FILE);
-            if bundled.is_file() {
-                bundled
-            } else {
-                install_root.join("loop-prompt.md")
-            }
-        })
 }
 
 fn print_help() {

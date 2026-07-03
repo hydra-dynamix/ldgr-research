@@ -128,12 +128,18 @@ fn init_installs_research_loop_prompt_and_adapter_resources() -> anyhow::Result<
         .join(".pi/agent/skills/research-project-setup/SKILL.md")
         .is_file());
     let connection = rusqlite::Connection::open(temp.path().join(".ldgr/ldgr.db"))?;
-    let status: String = connection.query_row(
-        "SELECT status FROM prompt WHERE slug = 'research-loop'",
+    let (status, source_path): (String, String) = connection.query_row(
+        "SELECT status, source_path FROM prompt WHERE slug = 'research-loop'",
         [],
-        |row| row.get(0),
+        |row| Ok((row.get(0)?, row.get(1)?)),
     )?;
     assert_eq!(status, "active");
+    assert_eq!(
+        source_path,
+        home.join(".ldgr/research/loop-prompt.md")
+            .to_string_lossy()
+            .as_ref()
+    );
     Ok(())
 }
 
@@ -266,6 +272,14 @@ fn profile_command_points_agents_to_install_init_dispatch() -> anyhow::Result<()
         predicate::str::contains("profile commands are not part of ldgr-research")
             .and(predicate::str::contains("ldgr-research install"))
             .and(predicate::str::contains("ldgr research <command>")),
+    );
+
+    let mut discover_command = research_command()?;
+    discover_command.args(["profile", "discover"]);
+    discover_command.assert().failure().stderr(
+        predicate::str::contains("profile commands are not part of ldgr-research")
+            .and(predicate::str::contains("ldgr-research profile apply").not())
+            .and(predicate::str::contains("ldgr-research profile apply community-sample").not()),
     );
     Ok(())
 }
