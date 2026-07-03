@@ -51,7 +51,9 @@ Complete these steps in order while minimizing ceremony:
    markdown reports, and final prose.
 6. **Queue possible next research direction.** If more useful research remains,
    queue exactly one next hypothesis/direction as the next work item. Keep it
-   bounded enough for a fresh agent instantiation to test in one cycle.
+   bounded enough for a fresh agent instantiation to test in one cycle. You may
+   promote a newly discovered work item when the evidence supports that direction;
+   make the evidence link explicit in the run summary and closing decision.
 7. **End the run.** Close the run with a compact decision rationale. It should
    reference the run summary artifact and include only outcome, confidence or
    limitation if material, and next work if queued.
