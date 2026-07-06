@@ -187,7 +187,7 @@ fn research_init_with_adapter_resources() -> Result<(), String> {
             manifest_path.display()
         );
     }
-    println!("activated LDGR research loop prompt {RESEARCH_LOOP_PROMPT_SLUG}");
+    println!("ensured global LDGR research loop prompt {RESEARCH_LOOP_PROMPT_SLUG}");
     println!("next: `ldgr research --help` or `ldgr-research status`");
     Ok(())
 }
@@ -620,12 +620,8 @@ fn is_loop_run(args: &[OsString]) -> bool {
 
 fn has_loop_prompt_source(args: &[OsString]) -> bool {
     args.iter().any(|arg| match arg.to_str() {
-        Some("--prompt") | Some("--prompt-slug") | Some("--bundle") => true,
-        Some(value) => {
-            value.starts_with("--prompt=")
-                || value.starts_with("--prompt-slug=")
-                || value.starts_with("--bundle=")
-        }
+        Some("--prompt") | Some("--prompt-slug") => true,
+        Some(value) => value.starts_with("--prompt=") || value.starts_with("--prompt-slug="),
         None => false,
     })
 }
@@ -664,7 +660,7 @@ fn apply_research_prompt(
 
 fn print_help() {
     println!(
-        "ldgr-research\n\nUsage:\n  ldgr-research install [OPTIONS]\n  ldgr-research adapter install [OPTIONS]\n  ldgr-research init\n  ldgr research <command> [options]\n  ldgr-research <ldgr-command> [ARGS...]\n\nAgent quickstart:\n  ldgr-research install\n  ldgr research init\n  ldgr research agent-guide\n  ldgr research doctor\n  ldgr research status\n  ldgr research context\n\nCommands:\n  install            Install the research adapter bundle and harness resources.\n  adapter install    Installer entrypoint used by LDGR core adapter install.\n  init               Initialize project research state and activate research-loop.\n  agent-guide        Print a copy-pasteable guide for autonomous agents.\n  mode               Enable, disable, or inspect the project research overlay.\n  core <command>     Run a core ldgr command through the research surface.\n  <research-command> Run research programs, branches, options, experiments, facts, and reports.\n\nCanonical LDGR surface:\n  After install, prefer `ldgr research <command>` so core owns discovery and dispatch.\n  `ldgr-research <command>` remains available for direct use and core pass-through.\n  `ldgr-research loop run` defaults to --prompt-slug research-loop when research mode is enabled and no prompt source is supplied.\n  `ldgr research core <ldgr-command>` is the escape hatch for conflicting core commands such as core run/artifact/decision.\n\nNo profile step is required. The research adapter is installed with `install` and initialized with `init`."
+        "ldgr-research\n\nUsage:\n  ldgr-research install [OPTIONS]\n  ldgr-research adapter install [OPTIONS]\n  ldgr-research init\n  ldgr research <command> [options]\n  ldgr-research <ldgr-command> [ARGS...]\n\nAgent quickstart:\n  ldgr-research install\n  ldgr research init\n  ldgr research agent-guide\n  ldgr research doctor\n  ldgr research status\n  ldgr research context\n\nCommands:\n  install            Install the research adapter bundle and harness resources.\n  adapter install    Installer entrypoint used by LDGR core adapter install.\n  init               Initialize project research state and ensure the global research-loop prompt exists.\n  agent-guide        Print a copy-pasteable guide for autonomous agents.\n  mode               Enable, disable, or inspect the project research overlay.\n  core <command>     Run a core ldgr command through the research surface.\n  <research-command> Run research programs, branches, options, experiments, facts, and reports.\n\nCanonical LDGR surface:\n  After install, prefer `ldgr research <command>` so core owns discovery and dispatch.\n  `ldgr-research <command>` remains available for direct use and core pass-through.\n  `ldgr-research loop run` defaults to --prompt-slug research-loop when research mode is enabled and no prompt source is supplied.\n  `ldgr research core <ldgr-command>` is the escape hatch for conflicting core commands such as core run/artifact/decision.\n\nNo profile step is required. The research adapter is installed with `install` and initialized with `init`."
     );
 }
 

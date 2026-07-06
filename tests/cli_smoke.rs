@@ -118,7 +118,7 @@ fn init_installs_research_loop_prompt_and_adapter_resources() -> anyhow::Result<
         .assert()
         .success()
         .stdout(predicate::str::contains(
-            "activated LDGR research loop prompt",
+            "ensured global LDGR research loop prompt",
         ));
 
     assert!(temp.path().join(".ldgr/research/research.db").is_file());
@@ -234,7 +234,7 @@ fn init_continues_when_adapter_bundle_refresh_is_unwritable() -> anyhow::Result<
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stdout.contains("activated LDGR research loop prompt"),
+        stdout.contains("ensured global LDGR research loop prompt"),
         "{stdout}"
     );
     assert!(

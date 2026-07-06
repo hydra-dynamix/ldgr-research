@@ -27,7 +27,7 @@ ldgr research loop run
 
 This follows the `ldgr-conduct` adapter pattern: the adapter binary owns install/init/resources/workflows, while LDGR core owns adapter discovery and dispatch through `adapter.toml`. `ldgr-research adapter install` is the installer entrypoint used by LDGR core; humans can run `ldgr-research install`.
 
-`ldgr-research install` materializes adapter resources under `~/.ldgr/research`, copies the research prompt to the centralized prompt directory `~/.ldgr/prompts/research-loop.md`, and installs adapter-owned skills into configured harness skill paths. `ldgr-research init` initializes project research state and imports/activates the `research-loop` prompt in the project core LDGR database. `ldgr-research loop run` and `ldgr research loop run` forward to `ldgr loop run` and automatically supply `--prompt-slug research-loop` when research mode is enabled and no explicit prompt source is provided.
+`ldgr-research install` materializes adapter resources under `~/.ldgr/research`, copies the research prompt to the centralized prompt directory `~/.ldgr/prompts/research-loop.md`, and installs adapter-owned skills into configured harness skill paths. `ldgr-research init` initializes project research state and ensures the global `research-loop` prompt exists. `ldgr-research loop run` and `ldgr research loop run` forward to `ldgr loop run` and automatically supply `--prompt-slug research-loop` when research mode is enabled and no explicit prompt source is provided.
 
 ## Research overlay mode
 
@@ -211,11 +211,12 @@ ldgr-research loop run
 # forwards to: ldgr loop run
 ```
 
-Explicit prompt sources are preserved:
+Explicit prompt sources are preserved and may be composed from files and global prompt slugs:
 
 ```sh
 ldgr-research loop run --prompt custom.md
-ldgr-research loop run --bundle cleanroom --prompt-role research-loop
+ldgr-research loop run --prompt custom.md --prompt ./prompts/project-rules.md
+ldgr-research loop run --prompt-slug research-project-loop
 ```
 
 ## Adapter commands
