@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## [0.1.4] - 2026-07-06
+
+### Changed
+
+- Install research adapter bundles under `~/.ldgr/adapters/research` by default.
+- Route the research loop prompt and `research-project-setup` skill through configured harness paths, preserving Pi defaults and supporting Codex prompt/skill roots when Codex is configured.
+- Refresh README and installed skill setup docs for harness-aware resource placement.
+- Bump package version for the coordinated LDGR 0.1.4 release train.
+
 ### Changed
 
 - Reduce routine research-loop ceremony by requiring a compact `run_summary.json`-style artifact and reserving long narrative reports for promotion points.
@@ -10,7 +19,7 @@
 - Remove the obsolete `profile discover/apply` command surface; agents install with `install`, initialize with `init`, then use `ldgr research <command>`.
 - Add `agent-guide` plus smoke coverage for agent-facing install/init/doctor/status/context and first research-spine commands.
 - Add research overlay mode controls plus `ldgr research core <command>` so agents can stay on the research surface while still recording core observations, validations, artifacts, decisions, and run closes.
-- Install the research loop prompt into the centralized LDGR prompt directory (`~/.ldgr/prompts/research-loop.md`) and keep adapter-owned skills in the install path used by both `ldgr-research install` and `ldgr adapter install research`.
+- Install the research loop prompt and adapter-owned skills into configured harness paths for both `ldgr-research install` and `ldgr adapter install research`.
 - Refresh the `research-project-setup` skill so it creates the current research program/branch/question/option/experiment spine, queues one core LDGR work item, and uses the unified `ldgr research` control surface.
 - Make `status` and `context` research-focused menus that include core LDGR status when research mode is enabled, and pass through core loop behavior without research prompt injection when research mode is disabled.
 - Add an empty workspace table so local source checkouts nested under the LDGR workspace can be built and tested standalone.

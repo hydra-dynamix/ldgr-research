@@ -103,7 +103,42 @@ fn install_alias_installs_harness_resources() -> anyhow::Result<()> {
     assert!(home
         .join(".pi/agent/skills/research-project-setup/SKILL.md")
         .is_file());
-    assert!(home.join(".ldgr/research/harness-setup.md").is_file());
+    assert!(install_root.join("harness-setup.md").is_file());
+    Ok(())
+}
+
+#[test]
+fn install_alias_uses_codex_paths_when_codex_harness_is_configured() -> anyhow::Result<()> {
+    let temp = TempDir::new()?;
+    let install_root = temp.path().join("research-adapter");
+    let home = temp.path().join("home");
+    fs::create_dir_all(home.join(".ldgr"))?;
+    fs::write(
+        home.join(".ldgr/config.json"),
+        serde_json::to_string_pretty(&serde_json::json!({
+            "installed": [{
+                "harness": "codex",
+                "prompt_paths": [home.join(".codex/prompts")],
+                "skill_paths": [home.join(".codex/skills")]
+            }]
+        }))?,
+    )?;
+
+    research_command()?
+        .env("HOME", &home)
+        .args([
+            "install",
+            "--install-root",
+            install_root.to_str().expect("utf-8 temp path"),
+        ])
+        .assert()
+        .success();
+
+    assert!(home.join(".codex/prompts/research-loop.md").is_file());
+    assert!(home
+        .join(".codex/skills/research-project-setup/SKILL.md")
+        .is_file());
+    assert!(!home.join(".pi/agent/skills").exists());
     Ok(())
 }
 
@@ -123,7 +158,9 @@ fn init_installs_research_loop_prompt_and_adapter_resources() -> anyhow::Result<
 
     assert!(temp.path().join(".ldgr/research/research.db").is_file());
     assert!(home.join(".ldgr/prompts/research-loop.md").is_file());
-    assert!(home.join(".ldgr/research/harness-setup.md").is_file());
+    assert!(home
+        .join(".ldgr/adapters/research/harness-setup.md")
+        .is_file());
     assert!(home
         .join(".pi/agent/skills/research-project-setup/SKILL.md")
         .is_file());
@@ -197,7 +234,7 @@ fn init_prefers_existing_adapter_path_for_bundle_refresh() -> anyhow::Result<()>
 
     assert!(adapter_root.join("loop-prompt.md").is_file());
     assert!(adapter_root.join("prompts/research-loop.md").is_file());
-    assert!(!home.join(".ldgr/research/adapter.toml").exists());
+    assert!(!home.join(".ldgr/adapters/research/adapter.toml").exists());
     Ok(())
 }
 
@@ -208,7 +245,7 @@ fn init_continues_when_adapter_bundle_refresh_is_unwritable() -> anyhow::Result<
 
     let temp = TempDir::new()?;
     let home = temp.path().join("home");
-    let adapter_root = home.join(".ldgr/research");
+    let adapter_root = home.join(".ldgr/adapters/research");
     fs::create_dir_all(&adapter_root)?;
     fs::set_permissions(&adapter_root, fs::Permissions::from_mode(0o500))?;
 

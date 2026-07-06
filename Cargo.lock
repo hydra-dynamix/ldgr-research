@@ -567,8 +567,8 @@ dependencies = [
 
 [[package]]
 name = "ldgr-core"
-version = "0.1.1"
-source = "git+https://github.com/hydra-dynamix/ldgr-core?branch=main#3a084ade3d30a7c97099046ff055829087ca6534"
+version = "0.1.4"
+source = "git+https://github.com/hydra-dynamix/ldgr-core?branch=main#7d9ad829ce837def944edc23d38913d1de961316"
 dependencies = [
  "anyhow",
  "base64",
@@ -588,7 +588,7 @@ dependencies = [
 
 [[package]]
 name = "ldgr-research"
-version = "0.1.1"
+version = "0.1.4"
 dependencies = [
  "anyhow",
  "assert_cmd",

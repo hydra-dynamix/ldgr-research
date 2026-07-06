@@ -40,7 +40,7 @@ ldgr research core artifact add <run-id> --kind report --path <path> --descripti
 
 1. **Preserve the setup request.** Record the operator's request, target paths, and constraints as a core artifact/observation through the research surface. Include `git status --short` when the target is a git repo.
 2. **Inspect the target.** Read project instructions (`AGENTS.md`, `CLAUDE.md`, README, benchmark docs, or equivalent). Record observations with command/path evidence.
-3. **Install adapter resources if needed.** If the adapter is not installed globally, run `ldgr adapter install research` or `ldgr-research install`. This installs the adapter bundle, `~/.ldgr/prompts/research-loop.md`, and adapter-owned skills.
+3. **Install adapter resources if needed.** If the adapter is not installed globally, run `ldgr adapter install research` or `ldgr-research install`. This installs the adapter bundle, the `research-loop` prompt, and adapter-owned skills into the configured harness paths from `~/.ldgr/config.json`.
 4. **Initialize project state.** From the project root, run `ldgr research init`, then verify `ldgr research mode status`, `ldgr research doctor`, `ldgr research status`, and `ldgr research context`.
 5. **Create the research program spine.** Create/select exactly one initial program, branch, open question, and option/hypothesis that match the setup request. Keep names stable and slug-like.
 6. **Create a bounded first experiment when the first hypothesis is known.** Use `ldgr research experiment create ...` for the narrow first test. Prefer exploration mode when the desired observation is not a strict falsification criterion yet.
@@ -127,8 +127,8 @@ Pass setup when:
 - `ldgr research doctor` does not report blocking setup errors;
 - `ldgr research status` and `ldgr research context` show the research overlay plus core status;
 - `ldgr research mode status` is enabled for research work;
-- the central prompt file exists at `~/.ldgr/prompts/research-loop.md` or `$LDGR_HOME/prompts/research-loop.md` after install;
-- adapter-owned skills were installed or a harness limitation was recorded;
+- the configured harness prompt path contains `research-loop.md` after install;
+- adapter-owned skills were installed into the configured harness skill path;
 - one current program and branch are set;
 - at least one open question/option exists;
 - exactly one bounded core next work item is queued for the first loop cycle.

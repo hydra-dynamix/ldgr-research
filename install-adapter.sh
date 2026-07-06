@@ -8,8 +8,8 @@ Usage: ./install-adapter.sh [--adapter-root PATH] [--install-root PATH] [--print
 Install the ldgr-research adapter bundle for LDGR discovery.
 
 Options:
-  --adapter-root PATH  Adapter root containing .<slug>/adapter.toml
-                       [default: $LDGR_HOME or ~/.ldgr]
+  --adapter-root PATH  Adapter root containing <slug>/adapter.toml
+                       [default: $LDGR_HOME/adapters or ~/.ldgr/adapters]
   --install-root PATH  Exact bundle directory [default: <adapter-root>/research]
   --print-path         Print the installed manifest path only
   -h, --help           Show this help
@@ -18,9 +18,9 @@ EOF
 
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 if [ -n "${LDGR_HOME:-}" ]; then
-  adapter_root="$LDGR_HOME"
+  adapter_root="$LDGR_HOME/adapters"
 else
-  adapter_root="${HOME:-.}/.ldgr"
+  adapter_root="${HOME:-.}/.ldgr/adapters"
 fi
 install_root=""
 print_path=0
@@ -67,10 +67,58 @@ cp "$script_dir/scripts/campaign_"*.sh "$install_root/scripts/"
 chmod +x "$install_root/scripts/campaign_"*.sh
 cp -R "$script_dir/skills/research-project-setup" "$install_root/skills/"
 
-prompt_root="${LDGR_HOME:-${HOME:-.}/.ldgr}/prompts"
-mkdir -p "$prompt_root"
-cp "$install_root/prompts/research-loop.md" "$prompt_root/research-loop.md"
-printf 'installed research prompts to %s\n' "$prompt_root"
+configured_paths() {
+  config="${HOME:-.}/.ldgr/config.json"
+  key="$1"
+  fallback="$2"
+  if command -v python3 >/dev/null 2>&1; then
+    python3 - "$config" "${HOME:-.}" "$key" "$fallback" <<'PY'
+import json
+import pathlib
+import sys
+
+config_path, home, key, fallback = sys.argv[1:5]
+home_path = pathlib.Path(home)
+paths = []
+try:
+    with open(config_path, "r", encoding="utf-8") as handle:
+        config = json.load(handle)
+except Exception:
+    config = {}
+for harness in config.get("installed", []):
+    for value in harness.get(key, []) or []:
+        if not isinstance(value, str) or not value.strip():
+            continue
+        if value == "~":
+            path = home_path
+        elif value.startswith("~/"):
+            path = home_path / value[2:]
+        else:
+            path = pathlib.Path(value)
+        text = str(path)
+        if text not in paths:
+            paths.append(text)
+if not paths:
+    paths.append(str(home_path / fallback))
+print("\n".join(paths))
+PY
+  else
+    printf '%s\n' "${HOME:-.}/$fallback"
+  fi
+}
+
+configured_paths prompt_paths ".ldgr/prompts" | while IFS= read -r prompt_root; do
+  mkdir -p "$prompt_root"
+  cp "$install_root/prompts/research-loop.md" "$prompt_root/research-loop.md"
+  printf 'installed research prompts to %s\n' "$prompt_root"
+done
+
+configured_paths skill_paths ".pi/agent/skills" | while IFS= read -r skill_root; do
+  mkdir -p "$skill_root"
+  rm -rf "$skill_root/research-project-setup"
+  cp -R "$install_root/skills/research-project-setup" "$skill_root/"
+  printf 'installed research skills to %s\n' "$skill_root"
+done
 
 manifest_path="$install_root/adapter.toml"
 if [ "$print_path" -eq 1 ]; then

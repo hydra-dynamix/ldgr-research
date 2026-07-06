@@ -62,9 +62,9 @@ Use `ldgr research <command>` for research adapter workflows after installing th
 
 Research adapter resources installed by `ldgr-research install`:
 
-- adapter bundle: `~/.ldgr/research` by default
-- central prompt file: `~/.ldgr/prompts/research-loop.md`
-- skill: `research-project-setup`
+- adapter bundle: `~/.ldgr/adapters/research` by default
+- prompt file: `research-loop.md` in the configured harness prompt path
+- skill: `research-project-setup/SKILL.md` in the configured harness skill path
 - active core loop prompt: `research-loop` after `ldgr-research init`
 
 Core LDGR commands remain available through `ldgr`. The research adapter owns research-specific programs, branches, options, experiments, facts, metrics, and reports.
@@ -227,6 +227,7 @@ fn default_adapter_root() -> PathBuf {
                 .unwrap_or_else(|| PathBuf::from("."))
                 .join(".ldgr")
         })
+        .join("adapters")
 }
 
 fn init_adapter_install_root() -> (PathBuf, bool) {
@@ -386,7 +387,7 @@ fn install_adapter_harness_resources(install_root: &Path) -> Result<(), String> 
         }
     }
     write_parented(
-        &home.join(".ldgr/research/harness-setup.md"),
+        &install_root.join("harness-setup.md"),
         RESEARCH_HARNESS_GUIDE,
     )?;
     Ok(())
@@ -397,17 +398,12 @@ fn install_adapter_prompt_files(install_root: &Path, home: &Path) -> Result<(), 
     if !prompts.is_dir() {
         return Ok(());
     }
-    let target = default_prompt_root(home);
-    copy_directory_children(&prompts, &target)?;
-    println!("installed research prompts to {}", target.display());
+    let config = read_ldgr_harness_config(home);
+    for target in configured_prompt_dirs(home, &config) {
+        copy_directory_children(&prompts, &target)?;
+        println!("installed research prompts to {}", target.display());
+    }
     Ok(())
-}
-
-fn default_prompt_root(home: &Path) -> PathBuf {
-    env::var_os("LDGR_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| home.join(".ldgr"))
-        .join(CENTRAL_PROMPTS_DIR)
 }
 
 fn read_ldgr_harness_config(home: &Path) -> Option<serde_json::Value> {
@@ -415,15 +411,32 @@ fn read_ldgr_harness_config(home: &Path) -> Option<serde_json::Value> {
     serde_json::from_str(&text).ok()
 }
 
+fn configured_prompt_dirs(home: &Path, config: &Option<serde_json::Value>) -> Vec<PathBuf> {
+    let mut dirs = configured_path_dirs(home, config, "prompt_paths");
+    if dirs.is_empty() {
+        dirs.push(home.join(".ldgr/prompts"));
+    }
+    dedup_paths(dirs)
+}
+
 fn configured_skill_dirs(home: &Path, config: &Option<serde_json::Value>) -> Vec<PathBuf> {
+    let mut dirs = configured_path_dirs(home, config, "skill_paths");
+    if dirs.is_empty() {
+        dirs.push(home.join(".pi/agent/skills"));
+    }
+    dedup_paths(dirs)
+}
+
+fn configured_path_dirs(
+    home: &Path,
+    config: &Option<serde_json::Value>,
+    key: &str,
+) -> Vec<PathBuf> {
     let mut dirs = Vec::new();
     if let Some(config) = config {
         if let Some(installed) = config.get("installed").and_then(|value| value.as_array()) {
             for harness in installed {
-                if let Some(paths) = harness
-                    .get("skill_paths")
-                    .and_then(|value| value.as_array())
-                {
+                if let Some(paths) = harness.get(key).and_then(|value| value.as_array()) {
                     dirs.extend(
                         paths
                             .iter()
@@ -434,27 +447,27 @@ fn configured_skill_dirs(home: &Path, config: &Option<serde_json::Value>) -> Vec
             }
         }
     }
-    if dirs.is_empty() {
-        dirs.push(home.join(".pi/agent/skills"));
-    }
-    dedup_paths(dirs)
+    dirs
 }
 
 fn json_path(value: &serde_json::Value) -> Option<&str> {
-    value.as_str()
+    value.as_str().filter(|value| !value.trim().is_empty())
 }
 
 fn expand_home_path(home: &Path, value: &str) -> PathBuf {
-    value
-        .strip_prefix("~/")
-        .map(|suffix| home.join(suffix))
-        .unwrap_or_else(|| PathBuf::from(value))
+    if value == "~" {
+        home.to_path_buf()
+    } else if let Some(rest) = value.strip_prefix("~/") {
+        home.join(rest)
+    } else {
+        PathBuf::from(value)
+    }
 }
 
 fn dedup_paths(paths: Vec<PathBuf>) -> Vec<PathBuf> {
     let mut deduped = Vec::new();
     for path in paths {
-        if !deduped.contains(&path) {
+        if !deduped.iter().any(|existing| existing == &path) {
             deduped.push(path);
         }
     }
@@ -706,21 +719,26 @@ fn apply_research_prompt(
 }
 
 fn installed_research_prompt_path(install_root: &Path) -> PathBuf {
-    env::var_os("HOME")
+    if let Some(home) = env::var_os("HOME")
         .or_else(|| env::var_os("USERPROFILE"))
         .map(PathBuf::from)
-        .map(|home| default_prompt_root(&home).join(RESEARCH_LOOP_PROMPT_FILE))
-        .filter(|path| path.is_file())
-        .unwrap_or_else(|| {
-            let bundled = install_root
-                .join(CENTRAL_PROMPTS_DIR)
-                .join(RESEARCH_LOOP_PROMPT_FILE);
-            if bundled.is_file() {
-                bundled
-            } else {
-                install_root.join("loop-prompt.md")
+    {
+        let config = read_ldgr_harness_config(&home);
+        for dir in configured_prompt_dirs(&home, &config) {
+            let path = dir.join(RESEARCH_LOOP_PROMPT_FILE);
+            if path.is_file() {
+                return path;
             }
-        })
+        }
+    }
+    let bundled = install_root
+        .join(CENTRAL_PROMPTS_DIR)
+        .join(RESEARCH_LOOP_PROMPT_FILE);
+    if bundled.is_file() {
+        bundled
+    } else {
+        install_root.join("loop-prompt.md")
+    }
 }
 
 fn print_help() {
@@ -731,12 +749,12 @@ fn print_help() {
 
 fn print_install_help() {
     println!(
-        "ldgr-research install\n\nOptions:\n      --adapter-root <PATH>  Adapter root; installs a research/ child [default: LDGR_HOME or ~/.ldgr]\n      --install-root <PATH>  Exact install directory for the research adapter bundle\n      --print-path           Print the installed adapter.toml path\n  -h, --help                 Print help\n\nInstalls the adapter bundle plus harness resources. After install, use `ldgr research --help`."
+        "ldgr-research install\n\nOptions:\n      --adapter-root <PATH>  Adapter root; installs a research/ child [default: LDGR_HOME/adapters or ~/.ldgr/adapters]\n      --install-root <PATH>  Exact install directory for the research adapter bundle\n      --print-path           Print the installed adapter.toml path\n  -h, --help                 Print help\n\nInstalls the adapter bundle plus Codex prompts and skills. After install, use `ldgr research --help`."
     );
 }
 
 fn print_adapter_install_help() {
     println!(
-        "ldgr-research adapter install\n\nInstaller entrypoint used by `ldgr adapter install`; humans can also use `ldgr-research install`.\n\nOptions:\n      --adapter-root <PATH>  Adapter root; installs a research/ child [default: LDGR_HOME or ~/.ldgr]\n      --install-root <PATH>  Exact install directory for the research adapter bundle\n      --print-path           Print the installed adapter.toml path\n  -h, --help                 Print help"
+        "ldgr-research adapter install\n\nInstaller entrypoint used by `ldgr adapter install`; humans can also use `ldgr-research install`.\n\nOptions:\n      --adapter-root <PATH>  Adapter root; installs a research/ child [default: LDGR_HOME/adapters or ~/.ldgr/adapters]\n      --install-root <PATH>  Exact install directory for the research adapter bundle\n      --print-path           Print the installed adapter.toml path\n  -h, --help                 Print help"
     );
 }
