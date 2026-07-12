@@ -33,7 +33,7 @@ jobs:
           - os: self-hosted
             platform: linux-aarch64
             binary_ext: ""
-          - os: macos-13
+          - os: macos-15-intel
             platform: macos-x86_64
             binary_ext: ""
           - os: macos-14
@@ -47,6 +47,10 @@ jobs:
       BINARY: ldgr-research
       RELEASE_NAME: ldgr-research
       GH_TOKEN: ${{ github.token }}
+      RELEASE_REPO: hydra-dynamix/ldgr-releases
+      LDGR_RELEASES_TOKEN: ${{ secrets.LDGR_RELEASES_TOKEN }}
+      LDGR_RELEASE_SIGNING_KEY_PEM: ${{ secrets.LDGR_RELEASE_SIGNING_KEY_PEM }}
+      LDGR_RELEASE_SIGNING_KEY_ID: ${{ vars.LDGR_RELEASE_SIGNING_KEY_ID }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -92,6 +96,7 @@ jobs:
           cp README.md "dist/${RELEASE_NAME}-${version}/"
           if [[ -f LICENSE ]]; then cp LICENSE "dist/${RELEASE_NAME}-${version}/"; fi
           if [[ -f adapter.toml ]]; then cp adapter.toml "dist/${RELEASE_NAME}-${version}/adapter.toml"; fi
+          cp adapter-resources.json "dist/${RELEASE_NAME}-${version}/adapter-resources.json"
           for dir in prompts templates extensions skills scripts docs; do
             if [[ -d "$dir" ]]; then mkdir -p "dist/${RELEASE_NAME}-${version}/${dir}"; cp -R "$dir/." "dist/${RELEASE_NAME}-${version}/${dir}/"; fi
           done
@@ -109,22 +114,56 @@ jobs:
           tar -C dist -czf "$archive" "${RELEASE_NAME}-${version}"
           if command -v sha256sum >/dev/null 2>&1; then
             sha256sum "$archive" > "${archive}.sha256"
+            digest="$(sha256sum "$archive" | awk '{print $1}')"
           else
             shasum -a 256 "$archive" > "${archive}.sha256"
+            digest="$(shasum -a 256 "$archive" | awk '{print $1}')"
           fi
+          cat > "dist/${RELEASE_NAME}-${version}-${platform}.index-entry.json" <<JSON
+          {"domain":"research","primary_namespace":"research","title":"Research adapter","aliases":[],"classification":"open_source","source_url":"https://github.com/${GITHUB_REPOSITORY}","releases":[{"version":"${version}","channel":"${{ github.event_name == 'workflow_dispatch' && inputs.prerelease == false && 'stable' || 'prerelease' }}","core_compatibility":">=0.1.0, <0.2.0","platforms":[{"platform":"${platform}","asset_url":"https://github.com/${RELEASE_REPO}/releases/download/research-v${version}/${RELEASE_NAME}-${version}-${platform}.tar.gz","archive_root":"${RELEASE_NAME}-${version}","binary":"${BINARY}","sha256":"${digest}","signature_url":"https://github.com/${RELEASE_REPO}/releases/download/research-v${version}/${RELEASE_NAME}-${version}-${platform}.tar.gz.sig","signing_key_id":"${LDGR_RELEASE_SIGNING_KEY_ID}","resource_manifest":"adapter-resources.json"}]}]}
+          JSON
+
+      - name: Sign archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${LDGR_RELEASE_SIGNING_KEY_PEM:-}"
+          test -n "${LDGR_RELEASE_SIGNING_KEY_ID:-}"
+          version="${{ steps.meta.outputs.version }}"
+          archive="dist/${RELEASE_NAME}-${version}-${{ matrix.platform }}.tar.gz"
+          umask 077
+          printf '%s' "$LDGR_RELEASE_SIGNING_KEY_PEM" > release-signing-key.pem
+          openssl pkeyutl -sign -rawin -inkey release-signing-key.pem -in "$archive" -out "${archive}.sig.raw"
+          signature="$(openssl base64 -A -in "${archive}.sig.raw")"
+          jq -n --arg algorithm Ed25519 --arg key_id "$LDGR_RELEASE_SIGNING_KEY_ID" --arg signature "$signature" '{algorithm:$algorithm,key_id:$key_id,signature:$signature}' > "${archive}.sig"
+          rm -f release-signing-key.pem "${archive}.sig.raw"
+
+      - name: Generate SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          path: dist/${{ env.RELEASE_NAME }}-${{ steps.meta.outputs.version }}
+          format: spdx-json
+          output-file: dist/${{ env.RELEASE_NAME }}-${{ steps.meta.outputs.version }}-${{ matrix.platform }}.sbom.spdx.json
+          upload-artifact: false
 
       - name: Create or update GitHub release
         shell: bash
         run: |
           set -euo pipefail
           version="${{ steps.meta.outputs.version }}"
-          tag="v${version}"
+          tag="research-v${version}"
           title="${RELEASE_NAME} v${version}"
           prerelease_flag=""
           if [[ "${{ github.event_name == 'workflow_dispatch' && inputs.prerelease || 'true' }}" == "true" ]]; then
             prerelease_flag="--prerelease"
           fi
-          if ! gh release view "$tag" >/dev/null 2>&1; then
-            gh release create "$tag" --title "$title" --notes "${RELEASE_NAME} ${version} binary release from ${GITHUB_SHA}." $prerelease_flag
+          if [[ -n "${LDGR_RELEASES_TOKEN:-}" ]]; then export GH_TOKEN="$LDGR_RELEASES_TOKEN"; fi
+          if ! gh release view "$tag" --repo "$RELEASE_REPO" >/dev/null 2>&1; then
+            gh release create "$tag" --repo "$RELEASE_REPO" --title "$title" --notes "${RELEASE_NAME} ${version} open adapter release from ${GITHUB_SHA}." $prerelease_flag
           fi
-          gh release upload "$tag" dist/${RELEASE_NAME}-${version}-*.tar.gz dist/${RELEASE_NAME}-${version}-*.tar.gz.sha256 --clobber
+          gh release upload "$tag" --repo "$RELEASE_REPO" \
+            dist/${RELEASE_NAME}-${version}-*.tar.gz \
+            dist/${RELEASE_NAME}-${version}-*.tar.gz.sha256 \
+            dist/${RELEASE_NAME}-${version}-*.tar.gz.sig \
+            dist/${RELEASE_NAME}-${version}-*.index-entry.json \
+            dist/${RELEASE_NAME}-${version}-*.sbom.spdx.json --clobber

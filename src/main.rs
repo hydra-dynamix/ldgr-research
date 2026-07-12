@@ -46,6 +46,9 @@ const RESEARCH_SPEC: &str = include_str!("../templates/research-spec.md");
 const RUN_SUMMARY: &str = include_str!("../templates/run-summary.json");
 const SETUP_SKILL: &str = include_str!("../skills/research-project-setup/SKILL.md");
 const SETUP_SKILL_TOML: &str = include_str!("../skills/research-project-setup/skill.toml");
+const RESOURCE_MANIFEST: &str = include_str!("../adapter-resources.json");
+const RESEARCH_EXTENSION: &str = include_str!("../extensions/ldgr-research.ts");
+const RESEARCH_COMMAND: &str = include_str!("../commands/ldgr-research.md");
 const SETUP_PROMPT_ARTIFACT: &str =
     include_str!("../skills/research-project-setup/fragments/prompt-artifact.md");
 const SETUP_ADAPTER: &str =
@@ -261,6 +264,10 @@ fn is_research_adapter_root(root: &Path) -> bool {
 
 fn install_bundle(install_root: &Path) -> Result<PathBuf, String> {
     write_parented(&install_root.join("adapter.toml"), ADAPTER_TOML)?;
+    write_parented(
+        &install_root.join("adapter-resources.json"),
+        RESOURCE_MANIFEST,
+    )?;
     write_parented(&install_root.join("loop-prompt.md"), LOOP_PROMPT)?;
     write_parented(
         &install_root
@@ -336,6 +343,14 @@ fn install_bundle(install_root: &Path) -> Result<PathBuf, String> {
     write_parented(
         &install_root.join("skills/research-project-setup/skill.toml"),
         SETUP_SKILL_TOML,
+    )?;
+    write_parented(
+        &install_root.join("extensions/ldgr-research.ts"),
+        RESEARCH_EXTENSION,
+    )?;
+    write_parented(
+        &install_root.join("commands/ldgr-research.md"),
+        RESEARCH_COMMAND,
     )?;
     write_parented(
         &install_root.join("skills/research-project-setup/fragments/prompt-artifact.md"),
