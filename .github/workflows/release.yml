@@ -33,7 +33,7 @@ jobs:
           - os: self-hosted
             platform: linux-aarch64
             binary_ext: ""
-          - os: macos-15-intel
+          - os: macos-13
             platform: macos-x86_64
             binary_ext: ""
           - os: macos-14
