@@ -97,6 +97,9 @@ jobs:
           if [[ -f LICENSE ]]; then cp LICENSE "dist/${RELEASE_NAME}-${version}/"; fi
           if [[ -f adapter.toml ]]; then cp adapter.toml "dist/${RELEASE_NAME}-${version}/adapter.toml"; fi
           cp adapter-resources.json "dist/${RELEASE_NAME}-${version}/adapter-resources.json"
+          mkdir -p "dist/${RELEASE_NAME}-${version}/prompts" "dist/${RELEASE_NAME}-${version}/commands"
+          cp loop-prompt.md "dist/${RELEASE_NAME}-${version}/prompts/research-loop.md"
+          cp commands/ldgr-research.md "dist/${RELEASE_NAME}-${version}/commands/ldgr-research.md"
           for dir in prompts templates extensions skills scripts docs; do
             if [[ -d "$dir" ]]; then mkdir -p "dist/${RELEASE_NAME}-${version}/${dir}"; cp -R "$dir/." "dist/${RELEASE_NAME}-${version}/${dir}/"; fi
           done
@@ -122,6 +125,23 @@ jobs:
           cat > "dist/${RELEASE_NAME}-${version}-${platform}.index-entry.json" <<JSON
           {"domain":"research","primary_namespace":"research","title":"Research adapter","aliases":[],"classification":"open_source","source_url":"https://github.com/${GITHUB_REPOSITORY}","releases":[{"version":"${version}","channel":"${{ github.event_name == 'workflow_dispatch' && inputs.prerelease == false && 'stable' || 'prerelease' }}","core_compatibility":">=0.1.0, <0.2.0","platforms":[{"platform":"${platform}","asset_url":"https://github.com/${RELEASE_REPO}/releases/download/research-v${version}/${RELEASE_NAME}-${version}-${platform}.tar.gz","archive_root":"${RELEASE_NAME}-${version}","binary":"${binary_file}","sha256":"${digest}","signature_url":"https://github.com/${RELEASE_REPO}/releases/download/research-v${version}/${RELEASE_NAME}-${version}-${platform}.tar.gz.sig","signing_key_id":"${LDGR_RELEASE_SIGNING_KEY_ID}","resource_manifest":"adapter-resources.json"}]}]}
           JSON
+
+      - name: Smoke release archive contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${{ steps.meta.outputs.version }}"
+          platform="${{ matrix.platform }}"
+          binary_file="${BINARY}${{ matrix.binary_ext }}"
+          archive="dist/${RELEASE_NAME}-${version}-${platform}.tar.gz"
+          archive_root="${RELEASE_NAME}-${version}"
+          smoke_dir="$(mktemp -d)"
+          tar -xzf "$archive" -C "$smoke_dir"
+          test -x "$smoke_dir/$archive_root/$platform/$binary_file"
+          "$smoke_dir/$archive_root/$platform/$binary_file" --help >/dev/null
+          while IFS= read -r source; do
+            test -e "$smoke_dir/$archive_root/$source"
+          done < <(jq -r '.resources[].source' "$smoke_dir/$archive_root/adapter-resources.json")
 
       - name: Sign archive
         shell: bash
