@@ -52,7 +52,7 @@ jobs:
       LDGR_RELEASE_SIGNING_KEY_PEM: ${{ secrets.LDGR_RELEASE_SIGNING_KEY_PEM }}
       LDGR_RELEASE_SIGNING_KEY_ID: ${{ vars.LDGR_RELEASE_SIGNING_KEY_ID }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
