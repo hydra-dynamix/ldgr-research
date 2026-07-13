@@ -77,6 +77,9 @@ fn adapter_install_materializes_research_bundle() -> anyhow::Result<()> {
     assert!(install_root
         .join("skills/research-project-setup/SKILL.md")
         .is_file());
+    assert!(install_root.join("adapter-resources.json").is_file());
+    assert!(install_root.join("extensions/ldgr-research.ts").is_file());
+    assert!(install_root.join("commands/ldgr-research.md").is_file());
     assert!(install_root.join("scripts/campaign_launch.sh").is_file());
     Ok(())
 }
