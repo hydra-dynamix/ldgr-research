@@ -177,7 +177,7 @@ jobs:
           tag="research-v${version}"
           title="${RELEASE_NAME} v${version}"
           prerelease_flag=""
-          if [[ "${{ github.event_name == 'workflow_dispatch' && inputs.prerelease || 'true' }}" == "true" ]]; then
+          if [[ "${{ inputs.prerelease }}" == "true" ]]; then
             prerelease_flag="--prerelease"
           fi
           if [[ -n "${LDGR_RELEASES_TOKEN:-}" ]]; then export GH_TOKEN="$LDGR_RELEASES_TOKEN"; fi
