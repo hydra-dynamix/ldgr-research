@@ -133,8 +133,10 @@ jobs:
           archive="dist/${RELEASE_NAME}-${version}-${{ matrix.platform }}.tar.gz"
           umask 077
           printf '%s' "$LDGR_RELEASE_SIGNING_KEY_PEM" > release-signing-key.pem
-          openssl pkeyutl -sign -rawin -inkey release-signing-key.pem -in "$archive" -out "${archive}.sig.raw"
-          signature="$(openssl base64 -A -in "${archive}.sig.raw")"
+          openssl_bin="openssl"
+          if [[ "$RUNNER_OS" == "macOS" ]]; then openssl_bin="$(brew --prefix openssl@3)/bin/openssl"; fi
+          "$openssl_bin" pkeyutl -sign -rawin -inkey release-signing-key.pem -in "$archive" -out "${archive}.sig.raw"
+          signature="$("$openssl_bin" base64 -A -in "${archive}.sig.raw")"
           jq -n --arg algorithm Ed25519 --arg key_id "$LDGR_RELEASE_SIGNING_KEY_ID" --arg signature "$signature" '{algorithm:$algorithm,key_id:$key_id,signature:$signature}' > "${archive}.sig"
           rm -f release-signing-key.pem "${archive}.sig.raw"
 
