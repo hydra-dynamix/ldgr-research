@@ -140,6 +140,7 @@ jobs:
           test -x "$smoke_dir/$archive_root/$platform/$binary_file"
           "$smoke_dir/$archive_root/$platform/$binary_file" --help >/dev/null
           while IFS= read -r source; do
+            source="${source%$'\r'}"
             test -e "$smoke_dir/$archive_root/$source"
           done < <(jq -r '.resources[].source' "$smoke_dir/$archive_root/adapter-resources.json")
 
