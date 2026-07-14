@@ -27,6 +27,7 @@ const RESEARCH_LOOP_PROMPT_FILE: &str = "research-loop.md";
 const RESEARCH_LOOP_PROMPT_ROLE: &str = "research-loop";
 
 const ADAPTER_TOML: &str = include_str!("../adapter.toml");
+const ADAPTER_DATABASE_CONTRACT: &str = include_str!("../adapter-database-contract.json");
 const LOOP_PROMPT: &str = include_str!("../loop-prompt.md");
 const RESEARCH_CAMPAIGN_PROCESS: &str = include_str!("../docs/research-campaign-process.md");
 const RESEARCH_LDGR_HANDOFF: &str = include_str!("../docs/research_ldgr_handoff.md");
@@ -264,6 +265,10 @@ fn is_research_adapter_root(root: &Path) -> bool {
 
 fn install_bundle(install_root: &Path) -> Result<PathBuf, String> {
     write_parented(&install_root.join("adapter.toml"), ADAPTER_TOML)?;
+    write_parented(
+        &install_root.join("adapter-database-contract.json"),
+        ADAPTER_DATABASE_CONTRACT,
+    )?;
     write_parented(
         &install_root.join("adapter-resources.json"),
         RESOURCE_MANIFEST,

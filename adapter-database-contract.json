@@ -1,0 +1,14 @@
+{
+  "component": {
+    "migration_digest": "sha256:1795f5ad5d3dbb3b57b5f733beec88c7f7f2b394d85e10b1bfe97a826d21eda4",
+    "migration_sources": [
+      "ldgr-research/src/migrations.rs"
+    ],
+    "minimum_core_schema": 4,
+    "namespace": "research",
+    "schema_version": 4
+  },
+  "contract_hash": "sha256:2d59299bf0738de94997d0f58e104b0de321800064f99d6391f2bdadabf2fc6c",
+  "core_schema_version": 4,
+  "format": "ldgr.adapter-database-contract.v1"
+}

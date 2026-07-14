@@ -1,7 +1,7 @@
 [adapter]
 slug = "research"
 title = "Research adapter"
-core_version = "0.1"
+core_version = "generated"
 aliases = ["ldgr-research"]
 
 [profile]

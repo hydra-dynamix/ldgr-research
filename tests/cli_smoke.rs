@@ -242,7 +242,7 @@ fn init_prefers_existing_adapter_path_for_bundle_refresh() -> anyhow::Result<()>
 }
 
 #[test]
-fn init_preserves_an_existing_core_v2_store() -> anyhow::Result<()> {
+fn init_preserves_an_existing_current_core_store() -> anyhow::Result<()> {
     let temp = TempDir::new()?;
     let home = temp.path().join("home");
     let db = temp.path().join(".ldgr/ldgr.db");
@@ -255,7 +255,11 @@ fn init_preserves_an_existing_core_v2_store() -> anyhow::Result<()> {
         [],
         |row| row.get(0),
     )?;
-    assert_eq!(schema_version, 2, "fixture must use Core schema v2");
+    assert_eq!(
+        schema_version,
+        ldgr::store::CURRENT_SCHEMA_VERSION,
+        "fixture must use the active Core schema"
+    );
     drop(connection);
 
     let output = research_command()?
@@ -272,7 +276,7 @@ fn init_preserves_an_existing_core_v2_store() -> anyhow::Result<()> {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         !stderr.contains("failed to initialize LDGR store"),
-        "research initializer rejected Core schema v2: {stderr}"
+        "research initializer rejected the active Core schema: {stderr}"
     );
 
     let connection = ldgr::store::open_store(&db)?;
@@ -282,8 +286,9 @@ fn init_preserves_an_existing_core_v2_store() -> anyhow::Result<()> {
         |row| row.get(0),
     )?;
     assert_eq!(
-        schema_version, 2,
-        "research init must preserve Core schema v2"
+        schema_version,
+        ldgr::store::CURRENT_SCHEMA_VERSION,
+        "research init must preserve the active Core schema"
     );
     Ok(())
 }
