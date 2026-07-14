@@ -241,6 +241,53 @@ fn init_prefers_existing_adapter_path_for_bundle_refresh() -> anyhow::Result<()>
     Ok(())
 }
 
+#[test]
+fn init_preserves_an_existing_core_v2_store() -> anyhow::Result<()> {
+    let temp = TempDir::new()?;
+    let home = temp.path().join("home");
+    let db = temp.path().join(".ldgr/ldgr.db");
+    let artifact_root = temp.path().join(".ldgr/artifacts");
+
+    ldgr::store::init_store(&db, &artifact_root)?;
+    let connection = ldgr::store::open_store(&db)?;
+    let schema_version: i64 = connection.query_row(
+        "SELECT version FROM schema_version WHERE id = 1",
+        [],
+        |row| row.get(0),
+    )?;
+    assert_eq!(schema_version, 2, "fixture must use Core schema v2");
+    drop(connection);
+
+    let output = research_command()?
+        .current_dir(temp.path())
+        .env("HOME", &home)
+        .arg("init")
+        .output()?;
+    anyhow::ensure!(
+        output.status.success(),
+        "research init failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stderr.contains("failed to initialize LDGR store"),
+        "research initializer rejected Core schema v2: {stderr}"
+    );
+
+    let connection = ldgr::store::open_store(&db)?;
+    let schema_version: i64 = connection.query_row(
+        "SELECT version FROM schema_version WHERE id = 1",
+        [],
+        |row| row.get(0),
+    )?;
+    assert_eq!(
+        schema_version, 2,
+        "research init must preserve Core schema v2"
+    );
+    Ok(())
+}
+
 #[cfg(unix)]
 #[test]
 fn init_continues_when_adapter_bundle_refresh_is_unwritable() -> anyhow::Result<()> {
