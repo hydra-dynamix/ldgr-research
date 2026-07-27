@@ -17,7 +17,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use ldgr::store::{
-    create_prompt, get_prompt, init_store, open_store, set_prompt_status, update_prompt,
+    create_prompt, get_prompt, init_store, list_runs, oldest_running_work_item, open_store,
+    set_prompt_status, set_work_item_status, update_prompt, RunStatus, WorkItemStatus,
 };
 
 const RESEARCH_LOOP_PROMPT_SLUG: &str = "research-loop";
@@ -45,21 +46,7 @@ const MILESTONES: &str = include_str!("../templates/milestones.md");
 const NEGATIVE_RESULT: &str = include_str!("../templates/negative-result.md");
 const RESEARCH_SPEC: &str = include_str!("../templates/research-spec.md");
 const RUN_SUMMARY: &str = include_str!("../templates/run-summary.json");
-const SETUP_SKILL: &str = include_str!("../skills/research-project-setup/SKILL.md");
-const SETUP_SKILL_TOML: &str = include_str!("../skills/research-project-setup/skill.toml");
 const RESOURCE_MANIFEST: &str = include_str!("../adapter-resources.json");
-const RESEARCH_EXTENSION: &str = include_str!("../extensions/ldgr-research.ts");
-const RESEARCH_COMMAND: &str = include_str!("../commands/ldgr-research.md");
-const SETUP_PROMPT_ARTIFACT: &str =
-    include_str!("../skills/research-project-setup/fragments/prompt-artifact.md");
-const SETUP_ADAPTER: &str =
-    include_str!("../skills/research-project-setup/fragments/adapter-setup.md");
-const SETUP_FIRST_WORK: &str =
-    include_str!("../skills/research-project-setup/fragments/first-work.md");
-const SETUP_EXAMPLE: &str =
-    include_str!("../skills/research-project-setup/examples/setup-summary.md");
-const SETUP_VALIDATOR: &str =
-    include_str!("../skills/research-project-setup/validators/setup_completeness.md");
 const RESEARCH_HARNESS_GUIDE: &str = r#"# LDGR Research harness guide
 
 Use `ldgr research <command>` for research adapter workflows after installing the research adapter. Start with `ldgr research --help`, then initialize project research state with `ldgr research init` or `ldgr-research init`.
@@ -341,42 +328,7 @@ fn install_bundle(install_root: &Path) -> Result<PathBuf, String> {
         &install_root.join("templates/run-summary.json"),
         RUN_SUMMARY,
     )?;
-    write_parented(
-        &install_root.join("skills/research-project-setup/SKILL.md"),
-        SETUP_SKILL,
-    )?;
-    write_parented(
-        &install_root.join("skills/research-project-setup/skill.toml"),
-        SETUP_SKILL_TOML,
-    )?;
-    write_parented(
-        &install_root.join("extensions/ldgr-research.ts"),
-        RESEARCH_EXTENSION,
-    )?;
-    write_parented(
-        &install_root.join("commands/ldgr-research.md"),
-        RESEARCH_COMMAND,
-    )?;
-    write_parented(
-        &install_root.join("skills/research-project-setup/fragments/prompt-artifact.md"),
-        SETUP_PROMPT_ARTIFACT,
-    )?;
-    write_parented(
-        &install_root.join("skills/research-project-setup/fragments/adapter-setup.md"),
-        SETUP_ADAPTER,
-    )?;
-    write_parented(
-        &install_root.join("skills/research-project-setup/fragments/first-work.md"),
-        SETUP_FIRST_WORK,
-    )?;
-    write_parented(
-        &install_root.join("skills/research-project-setup/examples/setup-summary.md"),
-        SETUP_EXAMPLE,
-    )?;
-    write_parented(
-        &install_root.join("skills/research-project-setup/validators/setup_completeness.md"),
-        SETUP_VALIDATOR,
-    )?;
+    remove_file_if_exists(&install_root.join("extensions/ldgr-research.ts"))?;
     Ok(install_root.join("adapter.toml"))
 }
 
@@ -389,6 +341,7 @@ fn install_adapter_harness_resources(install_root: &Path) -> Result<(), String> 
         })?;
     install_adapter_prompt_files(install_root, &home)?;
     let config = read_ldgr_harness_config(&home);
+    remove_legacy_research_harness_extensions(&home, &config)?;
     let skill_dirs = configured_skill_dirs(&home, &config);
     let skills = install_root.join("skills");
     if skills.is_dir() {
@@ -410,6 +363,32 @@ fn install_adapter_harness_resources(install_root: &Path) -> Result<(), String> 
         &install_root.join("harness-setup.md"),
         RESEARCH_HARNESS_GUIDE,
     )?;
+    Ok(())
+}
+
+fn remove_legacy_research_harness_extensions(
+    home: &Path,
+    config: &Option<serde_json::Value>,
+) -> Result<(), String> {
+    let mut dirs = configured_path_dirs(home, config, "extension_paths")
+        .into_iter()
+        .map(|path| {
+            if path.extension().is_some() {
+                path.parent().map(Path::to_path_buf).unwrap_or(path)
+            } else {
+                path
+            }
+        })
+        .collect::<Vec<_>>();
+    dirs.push(home.join(".pi/agent/extensions"));
+    dirs.push(home.join(".codex/extensions"));
+    for dir in dedup_paths(dirs) {
+        let path = dir.join("ldgr-research.ts");
+        if path.is_file() {
+            remove_file_if_exists(&path)?;
+            println!("removed legacy research extension {}", path.display());
+        }
+    }
     Ok(())
 }
 
@@ -550,6 +529,14 @@ fn write_parented(path: &Path, content: &str) -> Result<(), String> {
     fs::write(path, content).map_err(|error| format!("failed to write {}: {error}", path.display()))
 }
 
+fn remove_file_if_exists(path: &Path) -> Result<(), String> {
+    if path.is_file() {
+        fs::remove_file(path)
+            .map_err(|error| format!("failed to remove {}: {error}", path.display()))?;
+    }
+    Ok(())
+}
+
 fn write_executable(path: &Path, content: &str) -> Result<(), String> {
     write_parented(path, content)?;
     #[cfg(unix)]
@@ -592,6 +579,7 @@ fn is_research_command(command: &str) -> bool {
         "init"
             | "context"
             | "agent-guide"
+            | "workflow"
             | "mode"
             | "core"
             | "program"
@@ -627,8 +615,58 @@ fn is_research_command(command: &str) -> bool {
 }
 
 fn pass_through_ldgr(args: &[OsString]) -> Result<(), String> {
+    prepare_failed_loop_retry(args)?;
     let forwarded = research_adjusted_ldgr_args(args);
     pass_through_ldgr_raw(&forwarded)
+}
+
+fn prepare_failed_loop_retry(args: &[OsString]) -> Result<(), String> {
+    if !research_mode_enabled_for_args(args) || !is_loop_run(args) {
+        return Ok(());
+    }
+    let db = env::var_os("LDGR_DB")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(".ldgr/ldgr.db"));
+    if !db.is_file() {
+        return Ok(());
+    }
+    let connection = open_store(&db)
+        .map_err(|error| format!("failed to inspect core loop state before retry: {error:#}"))?;
+    let Some(work_item) = oldest_running_work_item(&connection)
+        .map_err(|error| format!("failed to inspect unfinished core work: {error:#}"))?
+    else {
+        return Ok(());
+    };
+    let runs = list_runs(&connection, None)
+        .map_err(|error| format!("failed to inspect prior core runs: {error:#}"))?;
+    if runs
+        .iter()
+        .any(|run| run.work_slug == work_item.slug && run.status == RunStatus::Running)
+    {
+        return Ok(());
+    }
+    let Some(previous) = runs
+        .iter()
+        .rev()
+        .find(|run| run.work_slug == work_item.slug)
+    else {
+        return Ok(());
+    };
+    if previous.status != RunStatus::Failed {
+        return Ok(());
+    }
+    set_work_item_status(
+        &connection,
+        &work_item.slug,
+        WorkItemStatus::Pending,
+        Some("operator reran the research loop after a failed agent attempt"),
+    )
+    .map_err(|error| format!("failed to make {} retryable: {error:#}", work_item.slug))?;
+    println!(
+        "research loop: retrying {} after failed run {}; prior failure evidence remains recorded",
+        work_item.slug, previous.run_id
+    );
+    Ok(())
 }
 
 fn pass_through_ldgr_raw(args: &[OsString]) -> Result<(), String> {

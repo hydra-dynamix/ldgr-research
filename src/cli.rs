@@ -54,6 +54,8 @@ pub enum Command {
     Context,
     /// Print a copy-pasteable guide for autonomous agents using ldgr-research.
     AgentGuide,
+    /// Print the research workflow an agent should follow.
+    Workflow,
     /// Enable, disable, or inspect the project research overlay.
     Mode(ModeArgs),
     /// Run a core ldgr command through the research surface.
@@ -125,6 +127,7 @@ pub fn run() -> anyhow::Result<()> {
         Command::Init => init_project(&cli.db, &cli.policy, &cli.tools),
         Command::Context => handle_context(&cli.db, &cli.policy, cli.enable_graph_reasoning),
         Command::AgentGuide => handle_agent_guide(),
+        Command::Workflow => handle_workflow(),
         Command::Mode(args) => handle_mode(&cli.policy, args),
         Command::Core(args) => pass_through_core(&args.argv),
         Command::Program(args) => handle_program(&cli.db, &cli.policy, args),
@@ -295,6 +298,13 @@ fn print_indented(text: &str) {
     for line in text.lines() {
         println!("  {line}");
     }
+}
+
+const RESEARCH_WORKFLOW: &str = include_str!("../workflows/research.md");
+
+fn handle_workflow() -> anyhow::Result<()> {
+    print!("{RESEARCH_WORKFLOW}");
+    Ok(())
 }
 
 fn handle_agent_guide() -> anyhow::Result<()> {
