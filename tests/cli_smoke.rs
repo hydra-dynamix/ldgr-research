@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use assert_cmd::Command;
 use predicates::prelude::*;
@@ -717,16 +717,8 @@ fn research_primitives_complete_happy_path_end_to_end() -> anyhow::Result<()> {
 #[test]
 fn non_conflicting_core_commands_pass_through_to_ldgr() -> anyhow::Result<()> {
     let temp = TempDir::new()?;
-    let fake_ldgr = temp.path().join("fake-ldgr.sh");
     let args_log = temp.path().join("args.txt");
-    fs::write(
-        &fake_ldgr,
-        format!(
-            "#!/usr/bin/env bash\nprintf '%s\\n' \"$*\" > {}\necho passed-through\n",
-            args_log.display()
-        ),
-    )?;
-    make_executable(&fake_ldgr)?;
+    let fake_ldgr = fake_ldgr(temp.path(), Some(&args_log), "passed-through")?;
 
     let mut command = research_command()?;
     command
@@ -745,16 +737,8 @@ fn non_conflicting_core_commands_pass_through_to_ldgr() -> anyhow::Result<()> {
 #[test]
 fn core_escape_hatch_passes_conflicting_commands_to_ldgr() -> anyhow::Result<()> {
     let temp = TempDir::new()?;
-    let fake_ldgr = temp.path().join("fake-ldgr.sh");
     let args_log = temp.path().join("args.txt");
-    fs::write(
-        &fake_ldgr,
-        format!(
-            "#!/usr/bin/env bash\nprintf '%s\n' \"$*\" > {}\necho core-pass-through\n",
-            args_log.display()
-        ),
-    )?;
-    make_executable(&fake_ldgr)?;
+    let fake_ldgr = fake_ldgr(temp.path(), Some(&args_log), "core-pass-through")?;
 
     research_command()?
         .env("LDGR_BIN", &fake_ldgr)
@@ -771,16 +755,8 @@ fn core_escape_hatch_passes_conflicting_commands_to_ldgr() -> anyhow::Result<()>
 #[test]
 fn mode_disable_stops_research_loop_prompt_injection() -> anyhow::Result<()> {
     let temp = TempDir::new()?;
-    let fake_ldgr = temp.path().join("fake-ldgr.sh");
     let args_log = temp.path().join("args.txt");
-    fs::write(
-        &fake_ldgr,
-        format!(
-            "#!/usr/bin/env bash\nprintf '%s\n' \"$*\" > {}\necho loop-pass-through\n",
-            args_log.display()
-        ),
-    )?;
-    make_executable(&fake_ldgr)?;
+    let fake_ldgr = fake_ldgr(temp.path(), Some(&args_log), "loop-pass-through")?;
 
     run_research(temp.path(), &["init"])?;
     run_research(temp.path(), &["mode", "disable"])?;
@@ -801,12 +777,7 @@ fn mode_disable_stops_research_loop_prompt_injection() -> anyhow::Result<()> {
 #[test]
 fn status_includes_core_and_research_sections() -> anyhow::Result<()> {
     let temp = TempDir::new()?;
-    let fake_ldgr = temp.path().join("fake-ldgr.sh");
-    fs::write(
-        &fake_ldgr,
-        "#!/usr/bin/env bash\necho core-status-from-fake\n",
-    )?;
-    make_executable(&fake_ldgr)?;
+    let fake_ldgr = fake_ldgr(temp.path(), None, "core-status-from-fake")?;
 
     run_research(temp.path(), &["init"])?;
     research_command()?
@@ -827,16 +798,8 @@ fn status_includes_core_and_research_sections() -> anyhow::Result<()> {
 #[test]
 fn loop_run_pass_through_defaults_to_research_prompt_slug() -> anyhow::Result<()> {
     let temp = TempDir::new()?;
-    let fake_ldgr = temp.path().join("fake-ldgr.sh");
     let args_log = temp.path().join("args.txt");
-    fs::write(
-        &fake_ldgr,
-        format!(
-            "#!/usr/bin/env bash\nprintf '%s\\n' \"$*\" > {}\necho loop-pass-through\n",
-            args_log.display()
-        ),
-    )?;
-    make_executable(&fake_ldgr)?;
+    let fake_ldgr = fake_ldgr(temp.path(), Some(&args_log), "loop-pass-through")?;
 
     let mut command = research_command()?;
     command
@@ -877,9 +840,7 @@ fn rerunning_loop_requeues_same_work_after_failed_agent_attempt() -> anyhow::Res
     )?;
     drop(connection);
 
-    let fake_ldgr = temp.path().join("fake-ldgr.sh");
-    fs::write(&fake_ldgr, "#!/usr/bin/env bash\necho loop-retried\n")?;
-    make_executable(&fake_ldgr)?;
+    let fake_ldgr = fake_ldgr(temp.path(), None, "loop-retried")?;
 
     research_command()?
         .current_dir(temp.path())
@@ -904,16 +865,8 @@ fn rerunning_loop_requeues_same_work_after_failed_agent_attempt() -> anyhow::Res
 #[test]
 fn loop_run_pass_through_preserves_explicit_prompt_source() -> anyhow::Result<()> {
     let temp = TempDir::new()?;
-    let fake_ldgr = temp.path().join("fake-ldgr.sh");
     let args_log = temp.path().join("args.txt");
-    fs::write(
-        &fake_ldgr,
-        format!(
-            "#!/usr/bin/env bash\nprintf '%s\\n' \"$*\" > {}\necho explicit-prompt\n",
-            args_log.display()
-        ),
-    )?;
-    make_executable(&fake_ldgr)?;
+    let fake_ldgr = fake_ldgr(temp.path(), Some(&args_log), "explicit-prompt")?;
 
     let mut command = research_command()?;
     command
@@ -936,6 +889,37 @@ fn make_executable(path: &Path) -> anyhow::Result<()> {
     permissions.set_mode(0o755);
     fs::set_permissions(path, permissions)?;
     Ok(())
+}
+
+/// Write a stand-in `ldgr` executable for `LDGR_BIN`.
+///
+/// Windows cannot execute a shell script, so emit a `.cmd` batch file there and
+/// a shell script everywhere else. Both append the received arguments to
+/// `args_log` when set, then print `stdout_line`.
+#[cfg(windows)]
+fn fake_ldgr(dir: &Path, args_log: Option<&Path>, stdout_line: &str) -> anyhow::Result<PathBuf> {
+    let path = dir.join("fake-ldgr.cmd");
+    let mut body = String::from("@echo off\r\n");
+    if let Some(log) = args_log {
+        // Parenthesized so a trailing digit in %* is not read as a redirect handle.
+        body.push_str(&format!("(echo %*)>\"{}\"\r\n", log.display()));
+    }
+    body.push_str(&format!("echo {stdout_line}\r\n"));
+    fs::write(&path, body)?;
+    Ok(path)
+}
+
+#[cfg(not(windows))]
+fn fake_ldgr(dir: &Path, args_log: Option<&Path>, stdout_line: &str) -> anyhow::Result<PathBuf> {
+    let path = dir.join("fake-ldgr.sh");
+    let mut body = String::from("#!/usr/bin/env bash\n");
+    if let Some(log) = args_log {
+        body.push_str(&format!("printf '%s\\n' \"$*\" > {}\n", log.display()));
+    }
+    body.push_str(&format!("echo {stdout_line}\n"));
+    fs::write(&path, body)?;
+    make_executable(&path)?;
+    Ok(path)
 }
 
 #[cfg(not(unix))]
