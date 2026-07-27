@@ -3,27 +3,12 @@
   "resources": [
     {
       "kind": "prompt",
-      "harnesses": ["pi", "codex"],
+      "harnesses": [
+        "pi",
+        "codex"
+      ],
       "source": "prompts/research-loop.md",
       "destination": "research-loop.md"
-    },
-    {
-      "kind": "skill",
-      "harnesses": ["pi", "codex", "claude", "openclaw"],
-      "source": "skills/research-project-setup",
-      "destination": "research-project-setup"
-    },
-    {
-      "kind": "extension",
-      "harnesses": ["pi"],
-      "source": "extensions/ldgr-research.ts",
-      "destination": "ldgr-research.ts"
-    },
-    {
-      "kind": "command",
-      "harnesses": ["claude", "openclaw"],
-      "source": "commands/ldgr-research.md",
-      "destination": "ldgr-research.md"
     }
   ]
 }

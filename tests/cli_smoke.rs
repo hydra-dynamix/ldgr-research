@@ -74,12 +74,12 @@ fn adapter_install_materializes_research_bundle() -> anyhow::Result<()> {
     assert!(install_root.join("adapter.toml").is_file());
     assert!(install_root.join("loop-prompt.md").is_file());
     assert!(install_root.join("prompts/research-loop.md").is_file());
-    assert!(install_root
-        .join("skills/research-project-setup/SKILL.md")
-        .is_file());
     assert!(install_root.join("adapter-resources.json").is_file());
-    assert!(install_root.join("extensions/ldgr-research.ts").is_file());
-    assert!(install_root.join("commands/ldgr-research.md").is_file());
+    // Adapters no longer ship skills, extensions, or harness commands. The
+    // single `ldgr` skill installed by core is the only harness surface.
+    assert!(!install_root.join("skills").exists());
+    assert!(!install_root.join("extensions").exists());
+    assert!(!install_root.join("commands").exists());
     assert!(install_root.join("scripts/campaign_launch.sh").is_file());
     Ok(())
 }
@@ -99,13 +99,11 @@ fn install_alias_installs_harness_resources() -> anyhow::Result<()> {
     command
         .assert()
         .success()
-        .stdout(predicate::str::contains("installed research skills"));
+        .stdout(predicate::str::contains("installed research prompts"));
 
     assert!(install_root.join("adapter.toml").is_file());
     assert!(home.join(".ldgr/prompts/research-loop.md").is_file());
-    assert!(home
-        .join(".pi/agent/skills/research-project-setup/SKILL.md")
-        .is_file());
+    assert!(!home.join(".pi/agent/skills").exists());
     assert!(install_root.join("harness-setup.md").is_file());
     Ok(())
 }
@@ -138,10 +136,40 @@ fn install_alias_uses_codex_paths_when_codex_harness_is_configured() -> anyhow::
         .success();
 
     assert!(home.join(".codex/prompts/research-loop.md").is_file());
-    assert!(home
-        .join(".codex/skills/research-project-setup/SKILL.md")
-        .is_file());
+    assert!(!home.join(".codex/skills").exists());
     assert!(!home.join(".pi/agent/skills").exists());
+    Ok(())
+}
+
+#[test]
+fn install_removes_legacy_research_extensions_without_touching_other_files() -> anyhow::Result<()> {
+    let temp = TempDir::new()?;
+    let install_root = temp.path().join("research-adapter");
+    let home = temp.path().join("home");
+    let pi_extensions = home.join(".pi/agent/extensions");
+    let codex_extensions = home.join(".codex/extensions");
+    fs::create_dir_all(&pi_extensions)?;
+    fs::create_dir_all(&codex_extensions)?;
+    fs::write(pi_extensions.join("ldgr-research.ts"), "legacy")?;
+    fs::write(codex_extensions.join("ldgr-research.ts"), "legacy")?;
+    fs::write(pi_extensions.join("third-party.ts"), "keep")?;
+
+    research_command()?
+        .env("HOME", &home)
+        .args([
+            "install",
+            "--install-root",
+            install_root.to_str().expect("utf-8 temp path"),
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "removed legacy research extension",
+        ));
+
+    assert!(!pi_extensions.join("ldgr-research.ts").exists());
+    assert!(!codex_extensions.join("ldgr-research.ts").exists());
+    assert!(pi_extensions.join("third-party.ts").is_file());
     Ok(())
 }
 
@@ -164,9 +192,7 @@ fn init_installs_research_loop_prompt_and_adapter_resources() -> anyhow::Result<
     assert!(home
         .join(".ldgr/adapters/research/harness-setup.md")
         .is_file());
-    assert!(home
-        .join(".pi/agent/skills/research-project-setup/SKILL.md")
-        .is_file());
+    assert!(!home.join(".pi/agent/skills").exists());
     let connection = rusqlite::Connection::open(temp.path().join(".ldgr/ldgr.db"))?;
     let status: String = connection.query_row(
         "SELECT status FROM prompt WHERE slug = 'research-loop'",
@@ -826,6 +852,52 @@ fn loop_run_pass_through_defaults_to_research_prompt_slug() -> anyhow::Result<()
         args.trim(),
         "loop run --prompt-slug research-loop --dry-run"
     );
+    Ok(())
+}
+
+#[test]
+fn rerunning_loop_requeues_same_work_after_failed_agent_attempt() -> anyhow::Result<()> {
+    use ldgr::store::{
+        create_work_item, finish_run, get_work_item_by_slug, init_store, open_store, start_run,
+        RunStatus, WorkItemStatus,
+    };
+
+    let temp = TempDir::new()?;
+    let db = temp.path().join(".ldgr/ldgr.db");
+    let artifacts = temp.path().join(".ldgr/artifacts");
+    init_store(&db, &artifacts)?;
+    let connection = open_store(&db)?;
+    create_work_item(&connection, None, "retry-me", "Retry me", "Bounded work")?;
+    let failed = start_run(&connection, "retry-me", Some("agentctl"))?;
+    finish_run(
+        &connection,
+        failed.id,
+        RunStatus::Failed,
+        Some("agent failed before completing work"),
+    )?;
+    drop(connection);
+
+    let fake_ldgr = temp.path().join("fake-ldgr.sh");
+    fs::write(&fake_ldgr, "#!/usr/bin/env bash\necho loop-retried\n")?;
+    make_executable(&fake_ldgr)?;
+
+    research_command()?
+        .current_dir(temp.path())
+        .env("LDGR_BIN", &fake_ldgr)
+        .args(["loop", "run", "--dry-run"])
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("research loop: retrying retry-me")
+                .and(predicate::str::contains(
+                    "prior failure evidence remains recorded",
+                ))
+                .and(predicate::str::contains("loop-retried")),
+        );
+
+    let connection = open_store(&db)?;
+    let work = get_work_item_by_slug(&connection, "retry-me")?;
+    assert_eq!(work.status, WorkItemStatus::Pending);
     Ok(())
 }
 

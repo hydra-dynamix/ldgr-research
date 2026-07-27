@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Changed
+
+- Stop shipping the Pi `ldgr-research.ts` extension and remove stale research
+  extension copies during install; research prompts and skills remain available
+  to both Pi and Codex without injecting harness code.
+- Treat a repeated `ldgr research loop run` after a terminal failed agent attempt
+  as an explicit retry of the same bounded work item, retaining the failed run
+  and artifacts instead of requiring a manual work-state correction.
+- Make the research loop prompt explicit about authority ordering, the
+  already-started core run, evidence commands, and canonical core closeout.
+- Tighten the project-setup skill so validations must actually run and setup
+  cannot hand off with an active or decision-pending run.
+
 ## [0.1.4] - 2026-07-06
 
 ### Changed

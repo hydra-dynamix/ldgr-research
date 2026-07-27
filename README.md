@@ -27,7 +27,7 @@ ldgr research loop run
 
 This follows the `ldgr-conduct` adapter pattern: the adapter binary owns install/init/resources/workflows, while LDGR core owns adapter discovery and dispatch through `adapter.toml`. `ldgr-research adapter install` is the installer entrypoint used by LDGR core; humans can run `ldgr-research install`.
 
-`ldgr-research install` materializes adapter resources under `~/.ldgr/adapters/research`, then copies the research prompt and adapter-owned skills into the paths declared by configured harness entries in `~/.ldgr/config.json`. With no harness config, it uses the Pi-compatible defaults `~/.ldgr/prompts` and `~/.pi/agent/skills`. `ldgr-research init` initializes project research state and imports/activates the `research-loop` prompt in the project core LDGR database. `ldgr-research loop run` and `ldgr research loop run` forward to `ldgr loop run` and automatically supply `--prompt-slug research-loop` when research mode is enabled and no explicit prompt source is provided.
+`ldgr-research install` materializes adapter resources under `~/.ldgr/adapters/research`, then copies the research prompt and adapter-owned skills into the paths declared by configured harness entries in `~/.ldgr/config.json`. With no harness config, it uses the Pi-compatible defaults `~/.ldgr/prompts` and `~/.pi/agent/skills`. The research adapter does not install harness extensions; install also removes stale `ldgr-research.ts` copies left by older releases. `ldgr-research init` initializes project research state and imports/activates the `research-loop` prompt in the project core LDGR database. `ldgr-research loop run` and `ldgr research loop run` forward to `ldgr loop run` and automatically supply `--prompt-slug research-loop` when research mode is enabled and no explicit prompt source is provided.
 
 ## Research overlay mode
 
@@ -217,6 +217,12 @@ Explicit prompt sources are preserved:
 ldgr-research loop run --prompt custom.md
 ldgr-research loop run --bundle cleanroom --prompt-role research-loop
 ```
+
+If an agent attempt exits unsuccessfully and leaves its work item in the core
+decision-pending state, running `ldgr research loop run` again explicitly retries
+that same bounded work item. The failed run and its artifacts remain in the
+ledger; the adapter only restores the work item to pending before forwarding the
+new loop invocation. A genuinely active run is never replaced this way.
 
 ## Adapter commands
 
