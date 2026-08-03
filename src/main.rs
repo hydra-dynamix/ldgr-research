@@ -8,6 +8,7 @@ mod migrations;
 mod policy;
 mod reports;
 mod schema;
+mod telemetry;
 mod tools;
 
 use std::env;
