@@ -431,6 +431,9 @@ pub fn update_experiment(
         Some(value) => value.map(str::to_owned),
         None => current.blocked_next_steps.as_deref().map(str::to_owned),
     };
+    let telemetry_status = update
+        .status
+        .filter(|status| current.status != status.as_str());
     let status = update
         .status
         .map(ExperimentStatus::as_str)
@@ -478,6 +481,9 @@ pub fn update_experiment(
     )
     .with_context(|| format!("failed to update experiment id {id}"))?;
     record_event(conn, "experiment", id, "update", "{}")?;
+    if let Some(status) = telemetry_status {
+        crate::telemetry::best_effort_emit_experiment_status_transition(&current.status, status);
+    }
     get_experiment_by_id(conn, id)
 }
 
@@ -494,6 +500,9 @@ pub fn update_experiment_status(
     )
     .with_context(|| format!("failed to update experiment id {id}"))?;
     record_event(conn, "experiment", id, "update_status", "{}")?;
+    if current.status != status.as_str() {
+        crate::telemetry::best_effort_emit_experiment_status_transition(&current.status, status);
+    }
     get_experiment_by_id(conn, id)
 }
 

@@ -15,6 +15,21 @@
 - Tighten the project-setup skill so validations must actually run and setup
   cannot hand off with an active or decision-pending run.
 
+## [0.1.6] - 2026-07-30
+
+### Added
+
+- Emit the released `research-workflow/v1` numerical experiment sequence through
+  Core-owned opt-in telemetry buffering; failed experiments map to the
+  completed-negative terminal (`4`) rather than operational failure.
+
+### Changed
+
+- Document that Research inherits Core telemetry controls (`status`, `preview`,
+  `transmit`, `enable`, `disable`) and that already-ingested sequences cannot be
+  individually located for deletion because collector records have no user,
+  installation, request, timestamp, or join identifier.
+
 ## [0.1.4] - 2026-07-06
 
 ### Changed

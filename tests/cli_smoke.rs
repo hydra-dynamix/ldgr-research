@@ -23,6 +23,7 @@ fn research_command() -> anyhow::Result<Command> {
     for key in COMMERCIAL_ENV_KEYS {
         command.env_remove(key);
     }
+    command.env_remove("LDGR_TELEMETRY");
     Ok(command)
 }
 
@@ -36,6 +37,51 @@ fn run_research(cwd: &Path, args: &[&str]) -> anyhow::Result<String> {
         String::from_utf8_lossy(&output.stderr)
     );
     Ok(String::from_utf8(output.stdout)?)
+}
+
+fn run_research_with_home(cwd: &Path, home: &Path, args: &[&str]) -> anyhow::Result<String> {
+    let output = research_command()?
+        .current_dir(cwd)
+        .env("HOME", home)
+        .args(args)
+        .output()?;
+    anyhow::ensure!(
+        output.status.success(),
+        "ldgr-research {} failed\nstdout:\n{}\nstderr:\n{}",
+        args.join(" "),
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    Ok(String::from_utf8(output.stdout)?)
+}
+
+fn enable_sequence_collection(home: &Path) -> anyhow::Result<()> {
+    ldgr::telemetry::save_telemetry_consent(
+        &home.join(".ldgr"),
+        &ldgr::telemetry::TelemetryConsent::current(
+            ldgr::telemetry::TelemetryConsentDecision::Enabled,
+        ),
+    )?;
+    Ok(())
+}
+
+fn research_sequence_payload_bytes(home: &Path) -> anyhow::Result<Vec<Vec<u8>>> {
+    let route = home.join(".ldgr/telemetry-pending/research-workflow/v1");
+    if !route.exists() {
+        return Ok(Vec::new());
+    }
+    let mut paths = fs::read_dir(route)?
+        .map(|entry| entry.map(|entry| entry.path()))
+        .collect::<Result<Vec<_>, _>>()?;
+    paths.sort();
+    paths.iter().map(|path| Ok(fs::read(path)?)).collect()
+}
+
+fn research_sequence_payloads(home: &Path) -> anyhow::Result<Vec<Vec<u16>>> {
+    research_sequence_payload_bytes(home)?
+        .iter()
+        .map(|payload| Ok(serde_json::from_slice::<Vec<u16>>(payload)?))
+        .collect()
 }
 
 #[test]
@@ -711,6 +757,122 @@ fn research_primitives_complete_happy_path_end_to_end() -> anyhow::Result<()> {
         temp.path(),
         &["--enable-graph-reasoning", "graph", "validate"],
     )?;
+    Ok(())
+}
+
+#[test]
+fn failed_experiment_queues_completed_negative_research_sequence() -> anyhow::Result<()> {
+    let temp = TempDir::new()?;
+    let home = temp.path().join("home");
+    enable_sequence_collection(&home)?;
+
+    run_research_with_home(temp.path(), &home, &["init"])?;
+    run_research_with_home(
+        temp.path(),
+        &home,
+        &[
+            "program",
+            "create",
+            "telemetry-demo",
+            "--title",
+            "Telemetry Demo",
+            "--objective",
+            "Validate research telemetry",
+        ],
+    )?;
+    run_research_with_home(
+        temp.path(),
+        &home,
+        &["program", "set-current", "telemetry-demo"],
+    )?;
+    run_research_with_home(
+        temp.path(),
+        &home,
+        &[
+            "branch",
+            "create",
+            "main",
+            "--program",
+            "telemetry-demo",
+            "--title",
+            "Main",
+            "--question",
+            "Does negative evidence stay useful?",
+            "--rationale",
+            "Telemetry regression",
+        ],
+    )?;
+    run_research_with_home(temp.path(), &home, &["branch", "set-current", "main"])?;
+    run_research_with_home(
+        temp.path(),
+        &home,
+        &[
+            "experiment",
+            "create",
+            "negative-check",
+            "--branch",
+            "main",
+            "--mode",
+            "exploration",
+            "--title",
+            "Negative check",
+            "--setup",
+            "local telemetry fixture",
+            "--observation-goal",
+            "Observe failed experiment terminal mapping",
+        ],
+    )?;
+    run_research_with_home(
+        temp.path(),
+        &home,
+        &[
+            "experiment",
+            "update",
+            "negative-check",
+            "--status",
+            "running",
+        ],
+    )?;
+    assert!(research_sequence_payloads(&home)?.is_empty());
+
+    run_research_with_home(
+        temp.path(),
+        &home,
+        &[
+            "experiment",
+            "update",
+            "negative-check",
+            "--status",
+            "failed",
+        ],
+    )?;
+
+    assert_eq!(research_sequence_payloads(&home)?, vec![vec![0, 1, 4]]);
+    let raw_payloads = research_sequence_payload_bytes(&home)?;
+    assert_eq!(raw_payloads, vec![b"[0,1,4]".to_vec()]);
+    let payload_text = std::str::from_utf8(&raw_payloads[0])?;
+    for prohibited in [
+        "telemetry-demo",
+        "Telemetry Demo",
+        "Validate research telemetry",
+        "Does negative evidence stay useful?",
+        "Telemetry regression",
+        "negative-check",
+        "Negative check",
+        "local telemetry fixture",
+        "Observe failed experiment terminal mapping",
+        "research",
+        "experiment",
+        "branch",
+        "citation",
+        "artifact",
+        "source",
+    ] {
+        assert!(
+            !payload_text.contains(prohibited),
+            "payload leaked `{prohibited}`"
+        );
+    }
     Ok(())
 }
 

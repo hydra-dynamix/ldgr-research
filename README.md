@@ -155,6 +155,30 @@ ldgr-research fact add hyp-1-supported \
 ldgr-research experiment complete exp-1
 ```
 
+## Numerical workflow sequences
+
+When Core numerical telemetry is explicitly enabled, terminal experiment status
+changes are submitted through LDGR Core's sequence buffer at
+`/sequences/research-workflow/v1`. The adapter does not prompt for consent,
+inspect the Core consent file, or open a telemetry network connection. Core owns
+local buffering, preview, HTTPS transmission, disablement, and the
+`LDGR_TELEMETRY=off` kill switch.
+
+The released Research workflow alphabet records only the committed experiment
+state path: planned (`0`), running (`1`), completed (`3`), failed research
+finding (`4`), inconclusive (`5`), operational failure (`6`), and
+superseded/cancelled (`7`). A failed experiment is treated as a
+completed-negative counterexample, not operational failure. Code `2` (`held`) is
+not declared for this endpoint.
+
+Use `ldgr telemetry status` and `ldgr telemetry preview` to inspect the effective
+Core decision and exact pending Research arrays, and use
+`ldgr telemetry transmit --collector https://...` to submit them best-effort to
+an HTTPS collector. `ldgr telemetry disable` deletes unsent local Research
+payloads and sends no network event. Already-ingested sequences cannot be
+individually located for deletion because accepted collector records have no
+user, installation, request, timestamp, or join identifier.
+
 ## Research primitives
 
 `ldgr-research` includes these research primitives:
