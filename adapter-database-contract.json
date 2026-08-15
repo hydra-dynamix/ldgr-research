@@ -8,7 +8,7 @@
     "namespace": "research",
     "schema_version": 4
   },
-  "contract_hash": "sha256:39beaf2a23ce5b9099adc6dd9458887fde58b9a101fbc70da0b0690c10482158",
+  "contract_hash": "sha256:4cac4b614e5c0d712e76baad95cd984b7e2eaa2377c8bbb770aabf87db8f6f5a",
   "core_schema_version": 5,
   "format": "ldgr.adapter-database-contract.v1"
 }

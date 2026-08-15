@@ -29,6 +29,7 @@ const RESEARCH_LOOP_PROMPT_FILE: &str = "research-loop.md";
 const RESEARCH_LOOP_PROMPT_ROLE: &str = "research-loop";
 
 const ADAPTER_TOML: &str = include_str!("../adapter.toml");
+const ADAPTER_COMPATIBILITY: &str = include_str!("../adapter-compatibility.json");
 const ADAPTER_DATABASE_CONTRACT: &str = include_str!("../adapter-database-contract.json");
 const LOOP_PROMPT: &str = include_str!("../loop-prompt.md");
 const RESEARCH_CAMPAIGN_PROCESS: &str = include_str!("../docs/research-campaign-process.md");
@@ -254,6 +255,10 @@ fn is_research_adapter_root(root: &Path) -> bool {
 fn install_bundle(install_root: &Path) -> Result<PathBuf, String> {
     write_parented(&install_root.join("adapter.toml"), ADAPTER_TOML)?;
     write_parented(
+        &install_root.join("adapter-compatibility.json"),
+        ADAPTER_COMPATIBILITY,
+    )?;
+    write_parented(
         &install_root.join("adapter-database-contract.json"),
         ADAPTER_DATABASE_CONTRACT,
     )?;
@@ -330,7 +335,31 @@ fn install_bundle(install_root: &Path) -> Result<PathBuf, String> {
         RUN_SUMMARY,
     )?;
     remove_file_if_exists(&install_root.join("extensions/ldgr-research.ts"))?;
-    Ok(install_root.join("adapter.toml"))
+    let manifest = install_root.join("adapter.toml");
+    patch_manifest_to_current_executable(&manifest)?;
+    Ok(manifest)
+}
+
+fn patch_manifest_to_current_executable(manifest: &Path) -> Result<(), String> {
+    let executable = env::current_exe()
+        .map_err(|error| format!("failed to resolve current research executable: {error}"))?;
+    let quoted = toml::Value::String(executable.display().to_string()).to_string();
+    let text = fs::read_to_string(manifest)
+        .map_err(|error| format!("failed to read {}: {error}", manifest.display()))?;
+    let patched = text
+        .lines()
+        .map(|line| {
+            if line.trim_start().starts_with("argv =") {
+                line.replace("\"ldgr-research\"", &quoted)
+            } else {
+                line.to_owned()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n";
+    fs::write(manifest, patched)
+        .map_err(|error| format!("failed to write {}: {error}", manifest.display()))
 }
 
 fn install_adapter_harness_resources(install_root: &Path) -> Result<(), String> {
