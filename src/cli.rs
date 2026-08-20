@@ -3770,11 +3770,25 @@ fn resolve_experiment_reference(
         }
         return Ok(id);
     }
-    let branch = resolve_branch_for_program(conn, policy, program_id)?
-        .context("experiment slug evidence requires a current branch in the same program")?;
-    let experiment = crate::db::get_experiment_by_slug(conn, branch.id, value)?
-        .with_context(|| format!("experiment `{value}` not found in current branch"))?;
-    Ok(experiment.id)
+    // `branch:slug` targets a specific branch; a bare slug searches every branch of
+    // the program and errors only on ambiguity.
+    if let Some((branch_slug, experiment_slug)) = value.split_once(':') {
+        let branch = crate::db::get_branch_by_slug(conn, program_id, branch_slug)?
+            .with_context(|| format!("branch `{branch_slug}` not found in program"))?;
+        let experiment = crate::db::get_experiment_by_slug(conn, branch.id, experiment_slug)?
+            .with_context(|| {
+                format!("experiment `{experiment_slug}` not found in branch `{branch_slug}`")
+            })?;
+        return Ok(experiment.id);
+    }
+    let matches = crate::db::find_experiments_by_slug_in_program(conn, program_id, value)?;
+    match matches.len() {
+        0 => bail!("experiment `{value}` not found in any branch of the program"),
+        1 => Ok(matches[0].id),
+        _ => {
+            bail!("experiment `{value}` exists in multiple branches; qualify it as <branch>:<slug>")
+        }
+    }
 }
 
 fn split_report_reference(value: Option<&str>) -> (Option<&str>, Option<&str>) {

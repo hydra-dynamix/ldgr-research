@@ -2809,3 +2809,25 @@ pub fn list_experiments_attacking_fact(
         .context("failed to read attacking experiments")?;
     Ok(experiments)
 }
+
+/// All experiments with the given slug across every branch of a program.
+pub fn find_experiments_by_slug_in_program(
+    conn: &Connection,
+    program_id: i64,
+    slug: &str,
+) -> anyhow::Result<Vec<Experiment>> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT experiment.* FROM experiment
+             JOIN branch ON branch.id = experiment.branch_id
+             WHERE branch.program_id = ?1 AND experiment.slug = ?2
+             ORDER BY experiment.id",
+        )
+        .context("failed to prepare program-wide experiment query")?;
+    let experiments = stmt
+        .query_map(params![program_id, slug], Experiment::from_row)
+        .context("failed to query experiments by slug")?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .context("failed to read experiments by slug")?;
+    Ok(experiments)
+}
