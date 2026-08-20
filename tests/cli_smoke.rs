@@ -1088,3 +1088,228 @@ fn fake_ldgr(dir: &Path, args_log: Option<&Path>, stdout_line: &str) -> anyhow::
 fn make_executable(_path: &Path) -> anyhow::Result<()> {
     Ok(())
 }
+
+#[test]
+fn preregistration_verdicts_review_gate_and_run_notes() -> anyhow::Result<()> {
+    let temp = TempDir::new()?;
+    fs::create_dir_all(temp.path().join("output"))?;
+    run_research(temp.path(), &["init"])?;
+    run_research(
+        temp.path(),
+        &[
+            "program",
+            "create",
+            "demo",
+            "--title",
+            "Demo",
+            "--objective",
+            "Verdict flow",
+        ],
+    )?;
+    run_research(temp.path(), &["program", "set-current", "demo"])?;
+    run_research(
+        temp.path(),
+        &[
+            "branch",
+            "create",
+            "main",
+            "--program",
+            "demo",
+            "--title",
+            "Main",
+            "--question",
+            "Q?",
+            "--rationale",
+            "R",
+        ],
+    )?;
+    run_research(temp.path(), &["branch", "set-current", "main"])?;
+
+    // a claim to attack
+    run_research(
+        temp.path(),
+        &[
+            "fact",
+            "add",
+            "shaky-claim",
+            "--program",
+            "demo",
+            "--statement",
+            "the shaky claim holds",
+            "--status",
+            "candidate",
+            "--evidence-report",
+            "docs/origin.md",
+        ],
+    )?;
+
+    // adversarial experiment with pre-registration hash
+    let created = run_research(
+        temp.path(),
+        &[
+            "experiment",
+            "create",
+            "attack-1",
+            "--branch",
+            "main",
+            "--mode",
+            "falsification",
+            "--hypothesis",
+            "shaky-claim is refutable",
+            "--setup",
+            "attack it",
+            "--primary-metric",
+            "refuted",
+            "--pass",
+            "the claim breaks",
+            "--fail",
+            "the claim survives",
+            "--allowed-next",
+            "record refutation",
+            "--blocked-next",
+            "building on the claim",
+            "--attacks-fact",
+            "shaky-claim",
+        ],
+    )?;
+    assert!(created.contains("registration_hash:"));
+    assert!(created.contains("attacks_fact: shaky-claim"));
+
+    // run notes + negative metric + failed finish via `finish --status failed`
+    run_research(
+        temp.path(),
+        &["experiment", "update", "attack-1", "--status", "running"],
+    )?;
+    let started = run_research(temp.path(), &["run", "start", "attack-1", "--command", "t"])?;
+    let run_id = started.trim().rsplit(' ').next().unwrap().to_string();
+    run_research(
+        temp.path(),
+        &["run", "note", &run_id, "--body", "first incremental note"],
+    )?;
+    let notes = run_research(temp.path(), &["run", "notes", &run_id])?;
+    assert!(notes.contains("first incremental note"));
+    run_research(
+        temp.path(),
+        &["metric", "add", &run_id, "delta", "-0.5", "--unit", "ratio"],
+    )?;
+    fs::write(temp.path().join("output/att.log"), "log")?;
+    run_research(
+        temp.path(),
+        &[
+            "artifact",
+            "add",
+            &run_id,
+            "output/att.log",
+            "--kind",
+            "log",
+        ],
+    )?;
+    let finished = run_research(
+        temp.path(),
+        &[
+            "run",
+            "finish",
+            &run_id,
+            "--status",
+            "failed",
+            "--notes",
+            "attack run crashed",
+        ],
+    )?;
+    assert!(finished.contains("[failed]"));
+
+    // verdict pass -> attacked fact contested
+    let second = run_research(temp.path(), &["run", "start", "attack-1"])?;
+    let run2 = second.trim().rsplit(' ').next().unwrap().to_string();
+    run_research(
+        temp.path(),
+        &["run", "finish", &run2, "--status", "success"],
+    )?;
+    let verdict = run_research(
+        temp.path(),
+        &[
+            "experiment",
+            "verdict",
+            "attack-1",
+            "--outcome",
+            "pass",
+            "--statement",
+            "registered pass criteria met",
+        ],
+    )?;
+    assert!(verdict.contains("recorded verdict `pass`"));
+    assert!(verdict.contains("marked CONTESTED"));
+    let shown = run_research(temp.path(), &["fact", "show", "shaky-claim"])?;
+    assert!(shown.contains("contested"));
+
+    // impact lists the attacker
+    let impact = run_research(temp.path(), &["fact", "impact", "shaky-claim"])?;
+    assert!(impact.contains("attack-1"));
+
+    // drift detection: mutate the registered surface, verdict must refuse
+    run_research(
+        temp.path(),
+        &[
+            "experiment",
+            "update",
+            "attack-1",
+            "--hypothesis",
+            "changed after the fact",
+        ],
+    )?;
+    let drift = research_command()?
+        .current_dir(temp.path())
+        .args(["experiment", "verdict", "attack-1", "--outcome", "pass"])
+        .output()?;
+    assert!(!drift.status.success());
+    assert!(String::from_utf8_lossy(&drift.stderr).contains("drift"));
+
+    // review gate: accepted facts need --reviewed-by when policy demands it
+    let policy_path = temp.path().join(".ldgr/research/policy.yaml");
+    let policy_text = fs::read_to_string(&policy_path)?;
+    fs::write(
+        &policy_path,
+        policy_text.replace(
+            "require_review_for_fact_acceptance: false",
+            "require_review_for_fact_acceptance: true",
+        ),
+    )?;
+    let gated = research_command()?
+        .current_dir(temp.path())
+        .args([
+            "fact",
+            "add",
+            "gated-claim",
+            "--program",
+            "demo",
+            "--statement",
+            "needs review",
+            "--status",
+            "accepted",
+            "--evidence-report",
+            "docs/origin.md",
+        ])
+        .output()?;
+    assert!(!gated.status.success());
+    assert!(String::from_utf8_lossy(&gated.stderr).contains("requires review"));
+    let ok = run_research(
+        temp.path(),
+        &[
+            "fact",
+            "add",
+            "gated-claim",
+            "--program",
+            "demo",
+            "--statement",
+            "needs review",
+            "--status",
+            "accepted",
+            "--evidence-report",
+            "docs/origin.md",
+            "--reviewed-by",
+            "adversarial-agent",
+        ],
+    )?;
+    assert!(ok.contains("created fact gated-claim [accepted]"));
+    Ok(())
+}

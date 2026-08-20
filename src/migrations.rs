@@ -5,7 +5,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::schema::INITIAL_SCHEMA_VERSION;
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 4;
+pub const CURRENT_SCHEMA_VERSION: i64 = 5;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AppliedMigration {
@@ -39,6 +39,11 @@ const MIGRATIONS: &[Migration] = &[
         version: 4,
         description: "add research evaluation matrices",
         sql: MIGRATION_004,
+    },
+    Migration {
+        version: 5,
+        description: "add pre-registration hashes, verdicts, adversarial fact links, and run notes",
+        sql: MIGRATION_005,
     },
 ];
 
@@ -705,4 +710,46 @@ BEGIN
     SET uuid = lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', abs(random()) % 4 + 1, 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))
     WHERE id = NEW.id;
 END;
+"#;
+
+const MIGRATION_005: &str = r#"
+ALTER TABLE experiment ADD COLUMN registration_hash TEXT;
+ALTER TABLE experiment ADD COLUMN attacks_fact TEXT;
+ALTER TABLE experiment ADD COLUMN verdict_outcome TEXT;
+ALTER TABLE experiment ADD COLUMN verdict_statement TEXT;
+ALTER TABLE experiment ADD COLUMN verdict_at TEXT;
+
+-- Rebuild artifact to extend the kind CHECK with log/code/data (SQLite cannot alter CHECKs).
+CREATE TABLE artifact_new (
+    id INTEGER PRIMARY KEY,
+    run_id INTEGER NOT NULL REFERENCES run(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL
+        CHECK (kind IN ('json', 'csv', 'audio', 'image', 'report', 'model', 'npz', 'midi', 'log', 'code', 'data', 'other')),
+    path TEXT NOT NULL,
+    description TEXT NOT NULL,
+    checksum TEXT,
+    metadata_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(metadata_json)),
+    uuid TEXT
+);
+INSERT INTO artifact_new (id, run_id, kind, path, description, checksum, metadata_json, uuid)
+    SELECT id, run_id, kind, path, description, checksum, metadata_json, uuid FROM artifact;
+DROP TABLE artifact;
+ALTER TABLE artifact_new RENAME TO artifact;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_artifact_uuid ON artifact(uuid);
+CREATE TRIGGER IF NOT EXISTS trg_artifact_uuid_after_insert
+AFTER INSERT ON artifact
+WHEN NEW.uuid IS NULL
+BEGIN
+    UPDATE artifact
+    SET uuid = lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', abs(random()) % 4 + 1, 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))
+    WHERE id = NEW.id;
+END;
+
+CREATE TABLE IF NOT EXISTS run_note (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id INTEGER NOT NULL REFERENCES run(id) ON DELETE CASCADE,
+    body TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+CREATE INDEX IF NOT EXISTS idx_run_note_run ON run_note(run_id);
 "#;

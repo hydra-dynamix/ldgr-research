@@ -2,6 +2,35 @@
 
 ## Unreleased
 
+### Added
+
+- Pre-registration hashes: `experiment create` records a canonical SHA-256 of the
+  falsifiable definition (hypothesis, setup, metrics, pass/fail criteria), and the
+  new `experiment verdict <slug> --outcome pass|fail|inconclusive` records outcomes
+  against the frozen criteria, refusing on definition drift unless `--allow-drift`.
+- Adversarial review as a first-class flow: `experiment create --attacks-fact <slug>`
+  links an attack experiment to a claim; a `pass` verdict automatically marks the
+  attacked fact `contested` and flags it for review.
+- `fact impact <slug>`: the downstream blast radius of a fact - attacking
+  experiments and slug mentions across facts and experiment definitions.
+- Optional review gate: policy `require_review_for_fact_acceptance: true` makes
+  `accepted` facts require `--reviewed-by <identity>`; `fact add` now accepts
+  `--reviewed-by` and marks the fact reviewed.
+- `run note <id> --body` / `run notes <id>`: timestamped incremental evidence
+  attached to research runs.
+- `--branch` overrides on experiment show/update/complete/submit/verdict, run
+  start/list, metric list, artifact list, and decision add - no more
+  `branch set-current` dance for cross-branch operations.
+- Artifact kinds `log`, `code`, and `data`.
+
+### Changed
+
+- Graph reasoning is now ON by default (policy `graph_reasoning_enabled: true`;
+  disable via policy or override with `--enable-graph-reasoning`), and the agent
+  guide documents the verdict/adversarial/impact/graph surface.
+- `run finish --status failed` is accepted and routed through the fail path.
+- `metric add` accepts negative values without the `--` escape.
+
 ### Changed
 
 - Stop shipping the Pi `ldgr-research.ts` extension and remove stale research

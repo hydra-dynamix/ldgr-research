@@ -2722,3 +2722,90 @@ fn record_event(
     .with_context(|| format!("failed to record {action} event for {entity_type} {entity_id}"))?;
     Ok(())
 }
+
+// ---- run notes (timestamped incremental evidence on research runs) ----
+
+pub fn create_run_note(conn: &Connection, run_id: i64, body: &str) -> anyhow::Result<i64> {
+    // ensure the run exists for a clear error
+    let _run = get_run_by_id(conn, run_id)?;
+    conn.execute(
+        "INSERT INTO run_note (run_id, body) VALUES (?1, ?2)",
+        params![run_id, body],
+    )
+    .with_context(|| format!("failed to add note to run {run_id}"))?;
+    Ok(conn.last_insert_rowid())
+}
+
+pub fn list_run_notes(
+    conn: &Connection,
+    run_id: i64,
+) -> anyhow::Result<Vec<(i64, String, String)>> {
+    let mut stmt = conn
+        .prepare("SELECT id, body, created_at FROM run_note WHERE run_id = ?1 ORDER BY id")
+        .context("failed to prepare run note query")?;
+    let notes = stmt
+        .query_map(params![run_id], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+        })
+        .context("failed to query run notes")?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .context("failed to read run notes")?;
+    Ok(notes)
+}
+
+// ---- pre-registration and verdicts ----
+
+pub fn set_experiment_registration(
+    conn: &Connection,
+    id: i64,
+    hash: &str,
+    attacks_fact: Option<&str>,
+) -> anyhow::Result<()> {
+    conn.execute(
+        "UPDATE experiment SET registration_hash = ?2, attacks_fact = ?3 WHERE id = ?1",
+        params![id, hash, attacks_fact],
+    )
+    .with_context(|| format!("failed to record registration for experiment id {id}"))?;
+    Ok(())
+}
+
+pub fn set_experiment_verdict(
+    conn: &Connection,
+    id: i64,
+    outcome: &str,
+    statement: Option<&str>,
+) -> anyhow::Result<()> {
+    conn.execute(
+        "UPDATE experiment
+         SET verdict_outcome = ?2,
+             verdict_statement = ?3,
+             verdict_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+         WHERE id = ?1",
+        params![id, outcome, statement],
+    )
+    .with_context(|| format!("failed to record verdict for experiment id {id}"))?;
+    record_event(conn, "experiment", id, "verdict", "{}")?;
+    Ok(())
+}
+
+/// Experiments (any branch of the program) that declare an attack on the given fact slug.
+pub fn list_experiments_attacking_fact(
+    conn: &Connection,
+    program_id: i64,
+    fact_slug: &str,
+) -> anyhow::Result<Vec<Experiment>> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT experiment.* FROM experiment
+             JOIN branch ON branch.id = experiment.branch_id
+             WHERE branch.program_id = ?1 AND experiment.attacks_fact = ?2
+             ORDER BY experiment.created_at",
+        )
+        .context("failed to prepare attacking-experiment query")?;
+    let experiments = stmt
+        .query_map(params![program_id, fact_slug], Experiment::from_row)
+        .context("failed to query attacking experiments")?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .context("failed to read attacking experiments")?;
+    Ok(experiments)
+}

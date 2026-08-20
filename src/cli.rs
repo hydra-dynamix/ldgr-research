@@ -147,7 +147,7 @@ pub fn run() -> anyhow::Result<()> {
         Command::Bug(args) => handle_bug(&cli.db, &cli.policy, args),
         Command::Tool(args) => handle_tool(&cli.tools, args),
         Command::Graph(args) => {
-            ensure_graph_reasoning_enabled(cli.enable_graph_reasoning)?;
+            ensure_graph_reasoning_enabled(&cli.policy, cli.enable_graph_reasoning)?;
             handle_graph(&cli.db, &cli.policy, args)
         }
         Command::Dashboard(args) => handle_dashboard(&cli.db, args),
@@ -375,8 +375,20 @@ ldgr research loop run --dry-run
 ldgr research loop run
 ```
 
+## Verdicts, adversarial review, and the claim graph
+
+```sh
+ldgr research experiment verdict <slug> --outcome pass|fail|inconclusive --statement "<why>"   # drift-checked against the pre-registered criteria
+ldgr research experiment create <slug> ... --attacks-fact <fact-slug>   # adversarial: a pass verdict marks the fact contested
+ldgr research fact impact <fact-slug>       # blast radius: what to revisit if this fact falls
+ldgr research graph summary                 # claim/evidence graph (on by default; policy: graph_reasoning_enabled)
+ldgr research run note <run-id> --body "<timestamped evidence>"
+```
+
 Rules for agents:
 - run `doctor`, `status`, and `context` before making changes;
+- record a verdict against the registered criteria before completing a falsification experiment;
+- red-team load-bearing claims with an `--attacks-fact` experiment before building on them;
 - record evidence through `ldgr research observation` / `ldgr research validation` and use `ldgr research core` for conflicting core commands;
 - keep LDGR core records authoritative;
 - install/init are the only adapter setup steps.
@@ -527,9 +539,17 @@ fn handle_branch(db: &Path, policy: &Path, args: BranchArgs) -> anyhow::Result<(
     Ok(())
 }
 
-fn ensure_graph_reasoning_enabled(enabled: bool) -> anyhow::Result<()> {
+fn ensure_graph_reasoning_enabled(policy: &Path, cli_flag: bool) -> anyhow::Result<()> {
+    if cli_flag {
+        return Ok(());
+    }
+    let enabled = crate::policy::load_policy(policy)
+        .map(|doc| doc.graph_reasoning_enabled)
+        .unwrap_or(true);
     if !enabled {
-        bail!("graph reasoning is disabled; rerun with --enable-graph-reasoning");
+        bail!(
+            "graph reasoning is disabled by policy (graph_reasoning_enabled: false); rerun with --enable-graph-reasoning to override"
+        );
     }
     Ok(())
 }
@@ -543,6 +563,7 @@ fn ensure_hypothesis_engine_enabled(enabled: bool) -> anyhow::Result<()> {
 
 fn handle_context(db: &Path, policy: &Path, enable_graph_reasoning: bool) -> anyhow::Result<()> {
     let policy_doc = crate::policy::load_policy(policy)?;
+    let enable_graph_reasoning = enable_graph_reasoning || policy_doc.graph_reasoning_enabled;
     if !policy_doc.research_mode_enabled {
         println!("LDGR Research context");
         println!("research mode: disabled");
@@ -1460,7 +1481,22 @@ fn handle_experiment(db: &Path, policy: &Path, args: ExperimentArgs) -> anyhow::
                     status: crate::schema::ExperimentStatus::Planned,
                 },
             )?;
+            if let Some(fact_slug) = args.attacks_fact.as_deref() {
+                crate::db::get_fact_by_slug(&conn, program.id, fact_slug)?
+                    .with_context(|| format!("attacked fact `{fact_slug}` not found in program"))?;
+            }
+            let hash = experiment_registration_hash(&experiment);
+            crate::db::set_experiment_registration(
+                &conn,
+                experiment.id,
+                &hash,
+                args.attacks_fact.as_deref(),
+            )?;
             println!("created experiment {}", experiment.slug);
+            println!("registration_hash: {hash}");
+            if let Some(fact_slug) = args.attacks_fact.as_deref() {
+                println!("attacks_fact: {fact_slug} (a `pass` verdict will mark it contested)");
+            }
         }
         ExperimentCommand::List(args) => {
             let (_program, branch) =
@@ -1478,14 +1514,16 @@ fn handle_experiment(db: &Path, policy: &Path, args: ExperimentArgs) -> anyhow::
             }
         }
         ExperimentCommand::Show(args) => {
-            let experiment = require_experiment_in_current_branch(&conn, policy, &args.slug)?;
+            let experiment =
+                require_experiment_in_branch(&conn, policy, &args.slug, args.branch.as_deref())?;
             print_experiment(&experiment);
         }
         ExperimentCommand::Submit(args) => {
             handle_experiment_submit(&conn, policy, args)?;
         }
         ExperimentCommand::Update(args) => {
-            let experiment = require_experiment_in_current_branch(&conn, policy, &args.slug)?;
+            let experiment =
+                require_experiment_in_branch(&conn, policy, &args.slug, args.branch.as_deref())?;
             if experiment_update_empty(&args) {
                 println!("no experiment updates requested");
             } else {
@@ -1535,9 +1573,73 @@ fn handle_experiment(db: &Path, policy: &Path, args: ExperimentArgs) -> anyhow::
                 );
             }
         }
+        ExperimentCommand::Verdict(args) => {
+            let experiment =
+                require_experiment_in_branch(&conn, policy, &args.slug, args.branch.as_deref())?;
+            match experiment.registration_hash.as_deref() {
+                Some(registered) => {
+                    let current = experiment_registration_hash(&experiment);
+                    if current != registered && !args.allow_drift {
+                        bail!(
+                            "registered definition drifted since creation (hash {} != {});                              review the change, then rerun with --allow-drift to record anyway",
+                            &current[..12],
+                            &registered[..12]
+                        );
+                    }
+                    if current != registered {
+                        println!("WARNING: verdict recorded against a drifted definition");
+                    }
+                }
+                None => println!(
+                    "note: experiment predates registration hashes; no drift check possible"
+                ),
+            }
+            if let Some(criteria) = experiment.pass_criteria.as_deref() {
+                println!("registered pass criteria: {criteria}");
+            }
+            if let Some(criteria) = experiment.fail_criteria.as_deref() {
+                println!("registered fail criteria: {criteria}");
+            }
+            crate::db::set_experiment_verdict(
+                &conn,
+                experiment.id,
+                args.outcome.as_str(),
+                args.statement.as_deref(),
+            )?;
+            println!(
+                "recorded verdict `{}` for experiment {}",
+                args.outcome.as_str(),
+                experiment.slug
+            );
+            if let (Some(fact_slug), VerdictOutcome::Pass) =
+                (experiment.attacks_fact.as_deref(), &args.outcome)
+            {
+                let (program, _branch) =
+                    resolve_current_program_branch(&conn, policy, args.branch.as_deref())?;
+                let fact = crate::db::get_fact_by_slug(&conn, program.id, fact_slug)?
+                    .with_context(|| format!("attacked fact `{fact_slug}` not found"))?;
+                crate::db::update_fact(
+                    &conn,
+                    fact.id,
+                    &crate::schema::FactUpdate {
+                        branch_id: None,
+                        statement: None,
+                        status: Some(crate::schema::FactStatus::Contested),
+                        confidence: None,
+                        created_from_experiment_id: None,
+                        created_from_decision_id: None,
+                        review_state: Some(crate::schema::ReviewState::NeedsReview),
+                    },
+                )?;
+                println!(
+                    "attacked fact {fact_slug} marked CONTESTED (adversarial pass); review downstream references with `fact impact {fact_slug}`"
+                );
+            }
+        }
         ExperimentCommand::Complete(args) => {
             let policy_doc = crate::policy::load_policy(policy)?;
-            let experiment = require_experiment_in_current_branch(&conn, policy, &args.slug)?;
+            let experiment =
+                require_experiment_in_branch(&conn, policy, &args.slug, args.branch.as_deref())?;
             validate_experiment_completion(&conn, &policy_doc, &experiment)?;
             let experiment = crate::db::update_experiment_status(
                 &conn,
@@ -1566,7 +1668,12 @@ fn handle_run(db: &Path, policy: &Path, args: RunArgs) -> anyhow::Result<()> {
     let conn = crate::db::open_database(db)?;
     match args.command {
         RunCommand::Start(args) => {
-            let experiment = require_experiment_in_current_branch(&conn, policy, &args.experiment)?;
+            let experiment = require_experiment_in_branch(
+                &conn,
+                policy,
+                &args.experiment,
+                args.branch.as_deref(),
+            )?;
             let environment_json = environment_json(args.env)?;
             let run = crate::db::create_run(
                 &conn,
@@ -1587,7 +1694,13 @@ fn handle_run(db: &Path, policy: &Path, args: RunArgs) -> anyhow::Result<()> {
             if status == crate::schema::RunStatus::Running {
                 bail!("run finish requires a terminal status");
             }
-            let run = crate::db::finish_run(&conn, run_id, status, args.notes.as_deref())?;
+            // `finish --status failed` is accepted and routed through the fail path so
+            // callers do not need to know about the separate `run fail` subcommand.
+            let run = if status == crate::schema::RunStatus::Failed {
+                crate::db::fail_run(&conn, run_id, args.notes.as_deref())?
+            } else {
+                crate::db::finish_run(&conn, run_id, status, args.notes.as_deref())?
+            };
             println!("finished run {} [{}]", run.id, run.status);
         }
         RunCommand::Fail(args) => {
@@ -1595,13 +1708,30 @@ fn handle_run(db: &Path, policy: &Path, args: RunArgs) -> anyhow::Result<()> {
             let run = crate::db::fail_run(&conn, run_id, args.notes.as_deref())?;
             println!("failed run {} [{}]", run.id, run.status);
         }
+        RunCommand::Note(args) => {
+            let run_id = parse_id(&args.run_id, "run id")?;
+            let note_id = crate::db::create_run_note(&conn, run_id, &args.body)?;
+            println!("added note {note_id} to run {run_id}");
+        }
+        RunCommand::Notes(args) => {
+            let run_id = parse_id(&args.run_id, "run id")?;
+            let notes = crate::db::list_run_notes(&conn, run_id)?;
+            if notes.is_empty() {
+                println!("No notes.");
+            } else {
+                for (id, body, created_at) in notes {
+                    println!("[{created_at}] ({id}) {body}");
+                }
+            }
+        }
         RunCommand::List(args) => {
-            let experiment = require_experiment_in_current_branch(
+            let experiment = require_experiment_in_branch(
                 &conn,
                 policy,
                 args.experiment
                     .as_deref()
                     .context("run list requires --experiment <slug>")?,
+                args.branch.as_deref(),
             )?;
             let runs = crate::db::list_runs_by_experiment(&conn, experiment.id)?;
             if runs.is_empty() {
@@ -1649,12 +1779,13 @@ fn handle_metric(db: &Path, policy: &Path, args: MetricArgs) -> anyhow::Result<(
             }
         }
         MetricCommand::List(args) => {
-            let experiment = require_experiment_in_current_branch(
+            let experiment = require_experiment_in_branch(
                 &conn,
                 policy,
                 args.experiment
                     .as_deref()
                     .context("metric list requires --experiment <slug>")?,
+                args.branch.as_deref(),
             )?;
             let metrics = crate::db::list_metrics_by_experiment(&conn, experiment.id)?;
             if metrics.is_empty() {
@@ -1702,12 +1833,13 @@ fn handle_artifact(db: &Path, policy: &Path, args: ArtifactArgs) -> anyhow::Resu
             }
         }
         ArtifactCommand::List(args) => {
-            let experiment = require_experiment_in_current_branch(
+            let experiment = require_experiment_in_branch(
                 &conn,
                 policy,
                 args.experiment
                     .as_deref()
                     .context("artifact list requires --experiment <slug>")?,
+                args.branch.as_deref(),
             )?;
             let artifacts = crate::db::list_artifacts_by_experiment(&conn, experiment.id)?;
             if artifacts.is_empty() {
@@ -1729,7 +1861,8 @@ fn handle_decision(db: &Path, policy: &Path, args: DecisionArgs) -> anyhow::Resu
     let conn = crate::db::open_database(db)?;
     match args.command {
         DecisionCommand::Add(args) => {
-            let (program, branch) = resolve_current_program_branch(&conn, policy, None)?;
+            let (program, branch) =
+                resolve_current_program_branch(&conn, policy, args.branch.as_deref())?;
             let experiment = crate::db::get_experiment_by_slug(&conn, branch.id, &args.experiment)?
                 .with_context(|| {
                     format!(
@@ -1789,6 +1922,8 @@ fn handle_fact(db: &Path, policy: &Path, args: FactArgs) -> anyhow::Result<()> {
                 args.evidence_report.as_deref(),
                 &args.statement,
             )?;
+            let status = args.status.into_schema();
+            enforce_fact_review_gate(policy, status, args.reviewed_by.as_deref())?;
             let fact = crate::db::create_fact(
                 &conn,
                 &crate::schema::NewFact {
@@ -1796,13 +1931,30 @@ fn handle_fact(db: &Path, policy: &Path, args: FactArgs) -> anyhow::Result<()> {
                     branch_id,
                     slug: &args.slug,
                     statement: &args.statement,
-                    status: args.status.into_schema(),
+                    status,
                     confidence: None,
                     created_from_experiment_id: evidence.experiment_id,
                     created_from_decision_id: evidence.decision_id,
                 },
                 &[evidence],
             )?;
+            let fact = if args.reviewed_by.is_some() {
+                crate::db::update_fact(
+                    &conn,
+                    fact.id,
+                    &crate::schema::FactUpdate {
+                        branch_id: None,
+                        statement: None,
+                        status: None,
+                        confidence: None,
+                        created_from_experiment_id: None,
+                        created_from_decision_id: None,
+                        review_state: Some(crate::schema::ReviewState::Reviewed),
+                    },
+                )?
+            } else {
+                fact
+            };
             println!("created fact {} [{}]", fact.slug, fact.status);
             if fact.review_state != "none" {
                 println!("review_state: {}", fact.review_state);
@@ -1835,8 +1987,19 @@ fn handle_fact(db: &Path, policy: &Path, args: FactArgs) -> anyhow::Result<()> {
             let fact = require_fact_in_current_program(&conn, policy, &args.slug)?;
             print_fact(&conn, &fact)?;
         }
+        FactCommand::Impact(args) => {
+            let fact = require_fact_in_current_program(&conn, policy, &args.slug)?;
+            print_fact_impact(&conn, &fact)?;
+        }
         FactCommand::Update(args) => {
             let fact = require_fact_in_current_program(&conn, policy, &args.slug)?;
+            if let Some(status) = &args.status {
+                enforce_fact_review_gate(
+                    policy,
+                    status.clone().into_schema(),
+                    args.reviewed_by.as_deref(),
+                )?;
+            }
             let review_state = if args.reviewed_by.is_some() {
                 Some(crate::schema::ReviewState::Reviewed)
             } else {
@@ -2572,7 +2735,7 @@ fn handle_experiment_submit(
     policy: &Path,
     args: ExperimentSubmit,
 ) -> anyhow::Result<()> {
-    let (program, branch) = resolve_current_program_branch(conn, policy, None)?;
+    let (program, branch) = resolve_current_program_branch(conn, policy, args.branch.as_deref())?;
     let experiment =
         crate::db::get_experiment_by_slug(conn, branch.id, &args.slug)?.with_context(|| {
             format!(
@@ -3060,14 +3223,123 @@ fn require_option_in_program(
         .with_context(|| format!("option `{slug}` not found in program"))
 }
 
-fn require_experiment_in_current_branch(
+/// Enforce the optional policy gate: accepted facts must carry a reviewer identity.
+fn enforce_fact_review_gate(
+    policy: &Path,
+    status: crate::schema::FactStatus,
+    reviewed_by: Option<&str>,
+) -> anyhow::Result<()> {
+    if status != crate::schema::FactStatus::Accepted || reviewed_by.is_some() {
+        return Ok(());
+    }
+    let policy_doc = crate::policy::load_policy(policy)?;
+    if policy_doc.require_review_for_fact_acceptance {
+        bail!(
+            "policy requires review for accepted facts: pass --reviewed-by <identity> (human, agent, or adversarial-agent) or record the fact as `candidate` first"
+        );
+    }
+    Ok(())
+}
+
+/// Downstream references of a fact: attacking experiments, slug mentions in other
+/// facts and experiments. The blast radius to revisit when the fact is refuted.
+fn print_fact_impact(
+    conn: &rusqlite::Connection,
+    fact: &crate::schema::Fact,
+) -> anyhow::Result<()> {
+    println!("Impact of fact {} [{}]:", fact.slug, fact.status);
+    let attackers = crate::db::list_experiments_attacking_fact(conn, fact.program_id, &fact.slug)?;
+    if !attackers.is_empty() {
+        println!("attacking experiments:");
+        for experiment in &attackers {
+            println!(
+                "  {} [{}] verdict: {}",
+                experiment.slug,
+                experiment.status,
+                experiment.verdict_outcome.as_deref().unwrap_or("none")
+            );
+        }
+    }
+    let pattern = format!("%{}%", fact.slug);
+    let mut stmt = conn.prepare(
+        "SELECT slug, status FROM fact
+         WHERE program_id = ?1 AND slug != ?2 AND statement LIKE ?3 ORDER BY slug",
+    )?;
+    let mentions = stmt
+        .query_map(
+            rusqlite::params![fact.program_id, fact.slug, pattern],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        )?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    if !mentions.is_empty() {
+        println!("facts whose statements mention this slug:");
+        for (slug, status) in &mentions {
+            println!("  {slug} [{status}]");
+        }
+    }
+    let mut stmt = conn.prepare(
+        "SELECT experiment.slug, experiment.status FROM experiment
+         JOIN branch ON branch.id = experiment.branch_id
+         WHERE branch.program_id = ?1
+           AND (experiment.hypothesis LIKE ?2 OR experiment.setup LIKE ?2)
+         ORDER BY experiment.slug",
+    )?;
+    let exp_mentions = stmt
+        .query_map(rusqlite::params![fact.program_id, pattern], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    if !exp_mentions.is_empty() {
+        println!("experiments whose hypothesis/setup mention this slug:");
+        for (slug, status) in &exp_mentions {
+            println!("  {slug} [{status}]");
+        }
+    }
+    if attackers.is_empty() && mentions.is_empty() && exp_mentions.is_empty() {
+        println!("no downstream references found");
+    }
+    println!(
+        "on refutation: mark this fact contested, then revisit every item above (`fact update {} --status contested`)",
+        fact.slug
+    );
+    Ok(())
+}
+
+/// Canonical hash of the pre-registered experiment definition (the falsifiable surface):
+/// slug, mode, hypothesis, setup, metrics, pass/fail criteria, and observation goal.
+fn experiment_registration_hash(experiment: &crate::schema::Experiment) -> String {
+    use sha2::{Digest, Sha256};
+    let canonical = serde_json::json!({
+        "slug": experiment.slug,
+        "mode": experiment.mode,
+        "hypothesis": experiment.hypothesis,
+        "setup": experiment.setup,
+        "primary_metrics": experiment.primary_metrics_json,
+        "secondary_metrics": experiment.secondary_metrics_json,
+        "pass": experiment.pass_criteria,
+        "fail": experiment.fail_criteria,
+        "observation_goal": experiment.observation_goal,
+    });
+    let mut hasher = Sha256::new();
+    hasher.update(canonical.to_string().as_bytes());
+    format!("{:x}", hasher.finalize())
+}
+
+/// Resolve an experiment in the given branch, falling back to the current branch
+/// when no `--branch` override is supplied.
+fn require_experiment_in_branch(
     conn: &rusqlite::Connection,
     policy: &Path,
     slug: &str,
+    branch_override: Option<&str>,
 ) -> anyhow::Result<crate::schema::Experiment> {
-    let (_program, branch) = resolve_current_program_branch(conn, policy, None)?;
-    crate::db::get_experiment_by_slug(conn, branch.id, slug)?
-        .with_context(|| format!("experiment `{slug}` not found in current branch"))
+    let (_program, branch) = resolve_current_program_branch(conn, policy, branch_override)?;
+    crate::db::get_experiment_by_slug(conn, branch.id, slug)?.with_context(|| {
+        format!(
+            "experiment `{slug}` not found in branch `{}` (pass --branch <slug> to target another branch)",
+            branch.slug
+        )
+    })
 }
 
 fn resolve_bug_links(
@@ -3952,10 +4224,12 @@ pub struct ExperimentArgs {
 pub enum ExperimentCommand {
     Create(ExperimentCreate),
     List(ExperimentList),
-    Show(SlugArg),
+    Show(ExperimentRef),
     Submit(ExperimentSubmit),
     Update(ExperimentUpdate),
-    Complete(SlugArg),
+    Complete(ExperimentRef),
+    /// Record the pass/fail verdict against the pre-registered criteria (drift-checked).
+    Verdict(ExperimentVerdict),
 }
 
 #[derive(Debug, Args)]
@@ -3991,6 +4265,42 @@ pub struct ExperimentCreate {
     pub rationale: Option<String>,
     #[arg(long)]
     pub option: Option<String>,
+    /// Slug of a fact this experiment adversarially attacks; a `pass` verdict marks it contested.
+    #[arg(long = "attacks-fact")]
+    pub attacks_fact: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct ExperimentVerdict {
+    pub slug: String,
+    /// Branch to resolve the experiment in (defaults to the current branch).
+    #[arg(long)]
+    pub branch: Option<String>,
+    #[arg(long, value_enum)]
+    pub outcome: VerdictOutcome,
+    /// One-sentence justification tying the outcome to the registered criteria.
+    #[arg(long)]
+    pub statement: Option<String>,
+    /// Record the verdict even though the registered definition drifted since creation.
+    #[arg(long = "allow-drift")]
+    pub allow_drift: bool,
+}
+
+#[derive(Clone, Debug, ValueEnum)]
+pub enum VerdictOutcome {
+    Pass,
+    Fail,
+    Inconclusive,
+}
+
+impl VerdictOutcome {
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::Pass => "pass",
+            Self::Fail => "fail",
+            Self::Inconclusive => "inconclusive",
+        }
+    }
 }
 
 #[derive(Clone, Debug, ValueEnum)]
@@ -4017,6 +4327,9 @@ pub struct ExperimentList {
 #[derive(Debug, Args)]
 pub struct ExperimentSubmit {
     pub slug: String,
+    /// Branch to resolve the experiment in (defaults to the current branch).
+    #[arg(long)]
+    pub branch: Option<String>,
     #[arg(long)]
     pub file: PathBuf,
 }
@@ -4024,6 +4337,9 @@ pub struct ExperimentSubmit {
 #[derive(Debug, Args)]
 pub struct ExperimentUpdate {
     pub slug: String,
+    /// Branch to resolve the experiment in (defaults to the current branch).
+    #[arg(long)]
+    pub branch: Option<String>,
     #[arg(long)]
     pub title: Option<String>,
     #[arg(long)]
@@ -4087,6 +4403,10 @@ pub struct RunArgs {
 pub enum RunCommand {
     Start(RunStart),
     Finish(RunFinish),
+    /// Attach a timestamped note to a run (incremental evidence).
+    Note(RunNote),
+    /// List the notes attached to a run.
+    Notes(RunNotesArg),
     Fail(RunFail),
     List(RunList),
 }
@@ -4094,6 +4414,9 @@ pub enum RunCommand {
 #[derive(Debug, Args)]
 pub struct RunStart {
     pub experiment: String,
+    /// Branch to resolve the experiment in (defaults to the current branch).
+    #[arg(long)]
+    pub branch: Option<String>,
     #[arg(long)]
     pub command: Option<String>,
     #[arg(long)]
@@ -4139,6 +4462,18 @@ impl RunStatus {
 }
 
 #[derive(Debug, Args)]
+pub struct RunNote {
+    pub run_id: String,
+    #[arg(long)]
+    pub body: String,
+}
+
+#[derive(Debug, Args)]
+pub struct RunNotesArg {
+    pub run_id: String,
+}
+
+#[derive(Debug, Args)]
 pub struct RunFail {
     pub run_id: String,
     #[arg(long)]
@@ -4149,6 +4484,9 @@ pub struct RunFail {
 pub struct RunList {
     #[arg(long)]
     pub experiment: Option<String>,
+    /// Branch to resolve the experiment in (defaults to the current branch).
+    #[arg(long)]
+    pub branch: Option<String>,
 }
 
 #[derive(Debug, Args)]
@@ -4168,6 +4506,8 @@ pub enum MetricCommand {
 pub struct MetricAdd {
     pub run_id: String,
     pub name: String,
+    /// Metric value; negative values are accepted directly (no `--` escape needed).
+    #[arg(allow_hyphen_values = true)]
     pub value: f64,
     #[arg(long)]
     pub unit: Option<String>,
@@ -4188,6 +4528,9 @@ pub struct MetricTrend {
 pub struct MetricList {
     #[arg(long)]
     pub experiment: Option<String>,
+    /// Branch to resolve the experiment in (defaults to the current branch).
+    #[arg(long)]
+    pub branch: Option<String>,
 }
 
 #[derive(Debug, Args)]
@@ -4225,6 +4568,9 @@ pub enum ArtifactKind {
     Model,
     Npz,
     Midi,
+    Log,
+    Code,
+    Data,
     Other,
 }
 
@@ -4239,6 +4585,9 @@ impl ArtifactKind {
             Self::Model => crate::schema::ArtifactKind::Model,
             Self::Npz => crate::schema::ArtifactKind::Npz,
             Self::Midi => crate::schema::ArtifactKind::Midi,
+            Self::Log => crate::schema::ArtifactKind::Log,
+            Self::Code => crate::schema::ArtifactKind::Code,
+            Self::Data => crate::schema::ArtifactKind::Data,
             Self::Other => crate::schema::ArtifactKind::Other,
         }
     }
@@ -4248,6 +4597,9 @@ impl ArtifactKind {
 pub struct ArtifactList {
     #[arg(long)]
     pub experiment: Option<String>,
+    /// Branch to resolve the experiment in (defaults to the current branch).
+    #[arg(long)]
+    pub branch: Option<String>,
 }
 
 #[derive(Debug, Args)]
@@ -4264,6 +4616,9 @@ pub enum DecisionCommand {
 #[derive(Debug, Args)]
 pub struct DecisionAdd {
     pub experiment: String,
+    /// Branch to resolve the experiment in (defaults to the current branch).
+    #[arg(long)]
+    pub branch: Option<String>,
     #[arg(long, value_enum)]
     pub decision: DecisionKind,
     #[arg(long, value_enum)]
@@ -4693,6 +5048,8 @@ pub struct FactArgs {
 
 #[derive(Debug, Subcommand)]
 pub enum FactCommand {
+    /// List everything that references this fact (downstream blast radius on refutation).
+    Impact(SlugArg),
     Add(FactAdd),
     List,
     Show(SlugArg),
@@ -4709,6 +5066,10 @@ pub struct FactAdd {
     pub statement: String,
     #[arg(long, value_enum)]
     pub status: FactStatus,
+    /// Reviewer identity (human, agent, or adversarial-agent). Required for `accepted`
+    /// facts when the policy sets require_review_for_fact_acceptance.
+    #[arg(long = "reviewed-by")]
+    pub reviewed_by: Option<String>,
     #[arg(long = "evidence-experiment")]
     pub evidence_experiment: Option<String>,
     #[arg(long = "evidence-artifact")]
@@ -5279,6 +5640,14 @@ pub struct ImportJson {
 #[derive(Debug, Args)]
 pub struct SlugArg {
     pub slug: String,
+}
+
+#[derive(Debug, Args)]
+pub struct ExperimentRef {
+    pub slug: String,
+    /// Branch to resolve the experiment in (defaults to the current branch).
+    #[arg(long)]
+    pub branch: Option<String>,
 }
 
 #[derive(Debug, Args)]
