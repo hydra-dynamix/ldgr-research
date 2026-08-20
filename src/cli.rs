@@ -381,7 +381,7 @@ ldgr research loop run
 ldgr research experiment verdict <slug> --outcome pass|fail|inconclusive --statement "<why>"   # drift-checked against the pre-registered criteria
 ldgr research experiment create <slug> ... --attacks-fact <fact-slug>   # adversarial: a pass verdict marks the fact contested
 ldgr research fact impact <fact-slug>       # blast radius: what to revisit if this fact falls
-ldgr research graph summary                 # claim/evidence graph (on by default; policy: graph_reasoning_enabled)
+ldgr research graph show                    # claim/evidence graph (on by default; policy: graph_reasoning_enabled)
 ldgr research run note <run-id> --body "<timestamped evidence>"
 ```
 
