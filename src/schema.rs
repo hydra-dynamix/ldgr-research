@@ -176,6 +176,12 @@ string_enum!(ResearchOptionClassification, "research option classification", {
     Maintenance => "maintenance",
 });
 
+string_enum!(SourceClass, "source class", {
+    Primary => "primary",
+    Secondary => "secondary",
+    Derived => "derived",
+});
+
 string_enum!(FactStatus, "fact status", {
     Candidate => "candidate",
     Accepted => "accepted",
@@ -743,6 +749,9 @@ pub struct Fact {
     pub review_state: String,
     pub created_at: String,
     pub updated_at: String,
+    /// primary = source read directly; secondary = someone else's report of it
+    /// (including tool summaries and subagent findings); derived = computed here.
+    pub source_class: Option<String>,
 }
 
 impl Fact {
@@ -760,6 +769,7 @@ impl Fact {
             review_state: row.get("review_state")?,
             created_at: row.get("created_at")?,
             updated_at: row.get("updated_at")?,
+            source_class: row.get("source_class").unwrap_or(None),
         })
     }
 }

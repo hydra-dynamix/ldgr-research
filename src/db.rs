@@ -2831,3 +2831,31 @@ pub fn find_experiments_by_slug_in_program(
         .context("failed to read experiments by slug")?;
     Ok(experiments)
 }
+
+/// Set the evidence provenance class of a fact (primary / secondary / derived).
+pub fn set_fact_source_class(conn: &Connection, id: i64, class: &str) -> anyhow::Result<()> {
+    conn.execute(
+        "UPDATE fact SET source_class = ?2 WHERE id = ?1",
+        params![id, class],
+    )
+    .with_context(|| format!("failed to set source class for fact id {id}"))?;
+    Ok(())
+}
+
+/// Facts whose recorded evidence provenance is `secondary` — candidates for a primary-source check.
+pub fn list_secondary_source_facts(
+    conn: &Connection,
+    program_id: i64,
+) -> anyhow::Result<Vec<Fact>> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT * FROM fact WHERE program_id = ?1 AND source_class = 'secondary' ORDER BY slug",
+        )
+        .context("failed to prepare secondary-source fact query")?;
+    let facts = stmt
+        .query_map(params![program_id], Fact::from_row)
+        .context("failed to query secondary-source facts")?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .context("failed to read secondary-source facts")?;
+    Ok(facts)
+}

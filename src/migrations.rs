@@ -5,7 +5,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::schema::INITIAL_SCHEMA_VERSION;
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 5;
+pub const CURRENT_SCHEMA_VERSION: i64 = 6;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AppliedMigration {
@@ -44,6 +44,11 @@ const MIGRATIONS: &[Migration] = &[
         version: 5,
         description: "add pre-registration hashes, verdicts, adversarial fact links, and run notes",
         sql: MIGRATION_005,
+    },
+    Migration {
+        version: 6,
+        description: "add evidence source class to facts",
+        sql: MIGRATION_006,
     },
 ];
 
@@ -752,4 +757,8 @@ CREATE TABLE IF NOT EXISTS run_note (
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 CREATE INDEX IF NOT EXISTS idx_run_note_run ON run_note(run_id);
+"#;
+
+const MIGRATION_006: &str = r#"
+ALTER TABLE fact ADD COLUMN source_class TEXT;
 "#;

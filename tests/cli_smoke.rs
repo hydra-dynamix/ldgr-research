@@ -1313,3 +1313,90 @@ fn preregistration_verdicts_review_gate_and_run_notes() -> anyhow::Result<()> {
     assert!(ok.contains("created fact gated-claim [accepted]"));
     Ok(())
 }
+
+#[test]
+fn secondary_source_facts_cannot_be_accepted() -> anyhow::Result<()> {
+    let temp = TempDir::new()?;
+    fs::create_dir_all(temp.path().join("output"))?;
+    run_research(temp.path(), &["init"])?;
+    run_research(
+        temp.path(),
+        &[
+            "program",
+            "create",
+            "demo",
+            "--title",
+            "D",
+            "--objective",
+            "Source classes",
+        ],
+    )?;
+    run_research(temp.path(), &["program", "set-current", "demo"])?;
+
+    // secondary evidence (a tool summary / someone else's report) cannot be accepted
+    let blocked = research_command()?
+        .current_dir(temp.path())
+        .args([
+            "fact",
+            "add",
+            "hearsay",
+            "--program",
+            "demo",
+            "--statement",
+            "their README says X",
+            "--status",
+            "accepted",
+            "--evidence-report",
+            "docs/sweep.md",
+            "--source",
+            "secondary",
+        ])
+        .output()?;
+    assert!(!blocked.status.success());
+    let err = String::from_utf8_lossy(&blocked.stderr);
+    assert!(
+        err.contains("secondary evidence"),
+        "unexpected error: {err}"
+    );
+
+    // recording it as a candidate is fine
+    let cand = run_research(
+        temp.path(),
+        &[
+            "fact",
+            "add",
+            "hearsay",
+            "--program",
+            "demo",
+            "--statement",
+            "their README says X",
+            "--status",
+            "candidate",
+            "--evidence-report",
+            "docs/sweep.md",
+            "--source",
+            "secondary",
+        ],
+    )?;
+    assert!(cand.contains("source_class: secondary"));
+
+    // promoting it while still secondary is refused
+    let promote = research_command()?
+        .current_dir(temp.path())
+        .args(["fact", "update", "hearsay", "--status", "accepted"])
+        .output()?;
+    assert!(!promote.status.success());
+    assert!(String::from_utf8_lossy(&promote.stderr).contains("secondary evidence"));
+
+    // after reading the primary source, reclassify and promote
+    let ok = run_research(
+        temp.path(),
+        &[
+            "fact", "update", "hearsay", "--status", "accepted", "--source", "primary",
+        ],
+    )?;
+    assert!(ok.contains("[accepted]"));
+    let shown = run_research(temp.path(), &["fact", "show", "hearsay"])?;
+    assert!(shown.contains("source_class: primary"));
+    Ok(())
+}

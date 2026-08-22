@@ -1924,6 +1924,8 @@ fn handle_fact(db: &Path, policy: &Path, args: FactArgs) -> anyhow::Result<()> {
             )?;
             let status = args.status.into_schema();
             enforce_fact_review_gate(policy, status, args.reviewed_by.as_deref())?;
+            let source_class = args.source_class.as_ref().map(SourceClass::as_str);
+            enforce_source_class_gate(status, source_class)?;
             let fact = crate::db::create_fact(
                 &conn,
                 &crate::schema::NewFact {
@@ -1955,7 +1957,13 @@ fn handle_fact(db: &Path, policy: &Path, args: FactArgs) -> anyhow::Result<()> {
             } else {
                 fact
             };
+            if let Some(class) = source_class {
+                crate::db::set_fact_source_class(&conn, fact.id, class)?;
+            }
             println!("created fact {} [{}]", fact.slug, fact.status);
+            if let Some(class) = source_class {
+                println!("source_class: {class}");
+            }
             if fact.review_state != "none" {
                 println!("review_state: {}", fact.review_state);
             }
@@ -1993,12 +2001,18 @@ fn handle_fact(db: &Path, policy: &Path, args: FactArgs) -> anyhow::Result<()> {
         }
         FactCommand::Update(args) => {
             let fact = require_fact_in_current_program(&conn, policy, &args.slug)?;
+            let new_class = args.source_class.as_ref().map(SourceClass::as_str);
             if let Some(status) = &args.status {
                 enforce_fact_review_gate(
                     policy,
                     status.clone().into_schema(),
                     args.reviewed_by.as_deref(),
                 )?;
+                let effective = new_class.or(fact.source_class.as_deref());
+                enforce_source_class_gate(status.clone().into_schema(), effective)?;
+            }
+            if let Some(class) = new_class {
+                crate::db::set_fact_source_class(&conn, fact.id, class)?;
             }
             let review_state = if args.reviewed_by.is_some() {
                 Some(crate::schema::ReviewState::Reviewed)
@@ -2427,6 +2441,10 @@ fn print_fact(conn: &rusqlite::Connection, fact: &crate::schema::Fact) -> anyhow
     println!("id: {}", fact.id);
     println!("statement: {}", fact.statement);
     println!("status: {}", fact.status);
+    match fact.source_class.as_deref() {
+        Some(class) => println!("source_class: {class}"),
+        None => println!("source_class: (unrecorded — predates provenance tagging)"),
+    }
     println!("review_state: {}", fact.review_state);
     print_evidence(conn, "fact", fact.id)
 }
@@ -3236,6 +3254,20 @@ fn enforce_fact_review_gate(
     if policy_doc.require_review_for_fact_acceptance {
         bail!(
             "policy requires review for accepted facts: pass --reviewed-by <identity> (human, agent, or adversarial-agent) or record the fact as `candidate` first"
+        );
+    }
+    Ok(())
+}
+
+/// Facts whose evidence is only someone else's report of a source — tool summaries,
+/// subagent findings — must not be accepted. Read the primary source first.
+fn enforce_source_class_gate(
+    status: crate::schema::FactStatus,
+    source_class: Option<&str>,
+) -> anyhow::Result<()> {
+    if status == crate::schema::FactStatus::Accepted && source_class == Some("secondary") {
+        bail!(
+            "a fact resting on secondary evidence (a summary or someone else's report) cannot be accepted: read the primary source and rerun with --source primary, or record it as `candidate`"
         );
     }
     Ok(())
@@ -5084,12 +5116,34 @@ pub struct FactAdd {
     /// facts when the policy sets require_review_for_fact_acceptance.
     #[arg(long = "reviewed-by")]
     pub reviewed_by: Option<String>,
+    /// Evidence provenance: `primary` (source read directly), `secondary` (someone else's
+    /// report of it — tool summaries, subagent findings), `derived` (computed here).
+    /// Facts resting only on `secondary` evidence cannot be accepted under review.
+    #[arg(long = "source", value_enum)]
+    pub source_class: Option<SourceClass>,
     #[arg(long = "evidence-experiment")]
     pub evidence_experiment: Option<String>,
     #[arg(long = "evidence-artifact")]
     pub evidence_artifact: Option<String>,
     #[arg(long = "evidence-report")]
     pub evidence_report: Option<String>,
+}
+
+#[derive(Clone, Debug, ValueEnum)]
+pub enum SourceClass {
+    Primary,
+    Secondary,
+    Derived,
+}
+
+impl SourceClass {
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::Primary => "primary",
+            Self::Secondary => "secondary",
+            Self::Derived => "derived",
+        }
+    }
 }
 
 #[derive(Debug, Args)]
@@ -5099,6 +5153,9 @@ pub struct FactUpdate {
     pub status: Option<FactStatus>,
     #[arg(long = "reviewed-by")]
     pub reviewed_by: Option<String>,
+    /// Re-classify evidence provenance (e.g. after checking the primary source).
+    #[arg(long = "source", value_enum)]
+    pub source_class: Option<SourceClass>,
 }
 
 #[derive(Debug, Args)]

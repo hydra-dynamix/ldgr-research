@@ -4,6 +4,12 @@
 
 ### Added
 
+- Evidence provenance: `fact add --source primary|secondary|derived` records whether a
+  claim rests on a source read directly, on someone else's report of it (tool summaries,
+  subagent findings), or on our own computation. A fact resting on `secondary` evidence
+  cannot be `accepted` — it must be re-checked against the primary source and promoted
+  with `fact update --source primary`. Added after a false claim about a third party's
+  documentation, sourced from an automated page summary, reached publication.
 - Pre-registration hashes: `experiment create` records a canonical SHA-256 of the
   falsifiable definition (hypothesis, setup, metrics, pass/fail criteria), and the
   new `experiment verdict <slug> --outcome pass|fail|inconclusive` records outcomes
