@@ -4,6 +4,10 @@
 
 ### Added
 
+- `context` now lists **every branch of the program** (status, experiment counts, and for
+  non-current branches the branch question and a switch hint) whenever the program has more
+  than one. Previously the cockpit was scoped entirely to the current branch, so a session
+  resuming on one branch had no signal that work on another existed at all.
 - Evidence provenance: `fact add --source primary|secondary|derived` records whether a
   claim rests on a source read directly, on someone else's report of it (tool summaries,
   subagent findings), or on our own computation. A fact resting on `secondary` evidence
@@ -35,6 +39,11 @@
   disable via policy or override with `--enable-graph-reasoning`), and the agent
   guide documents the verdict/adversarial/impact/graph surface.
 - `run finish --status failed` is accepted and routed through the fail path.
+- `experiment update --status <terminal>` now answers the linked research option, matching
+  `experiment complete` and `experiment submit`. Previously two paths reached the same
+  terminal state with different side effects, leaving options stale and the "recommended next
+  option" pointing at finished work. Updating to `completed` this way also now notes that it
+  skips the readiness validation `experiment complete` performs.
 - `metric add` accepts negative values without the `--` escape.
 
 ### Changed

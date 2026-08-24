@@ -1400,3 +1400,143 @@ fn secondary_source_facts_cannot_be_accepted() -> anyhow::Result<()> {
     assert!(shown.contains("source_class: primary"));
     Ok(())
 }
+
+#[test]
+fn context_lists_all_branches_and_terminal_update_answers_option() -> anyhow::Result<()> {
+    let temp = TempDir::new()?;
+    fs::create_dir_all(temp.path().join("output"))?;
+    run_research(temp.path(), &["init"])?;
+    run_research(
+        temp.path(),
+        &[
+            "program",
+            "create",
+            "demo",
+            "--title",
+            "D",
+            "--objective",
+            "Branch visibility",
+        ],
+    )?;
+    run_research(temp.path(), &["program", "set-current", "demo"])?;
+    for (slug, q) in [("main", "main question?"), ("side", "side question?")] {
+        run_research(
+            temp.path(),
+            &[
+                "branch",
+                "create",
+                slug,
+                "--program",
+                "demo",
+                "--title",
+                slug,
+                "--question",
+                q,
+                "--rationale",
+                "r",
+            ],
+        )?;
+    }
+    run_research(temp.path(), &["branch", "set-current", "main"])?;
+
+    // an experiment on the OTHER branch, with a linked option
+    run_research(
+        temp.path(),
+        &[
+            "option",
+            "add",
+            "side-opt",
+            "--program",
+            "demo",
+            "--branch",
+            "side",
+            "--title",
+            "Side option",
+            "--description",
+            "d",
+            "--classification",
+            "exploratory",
+            "--hypothesis",
+            "h",
+        ],
+    )?;
+    run_research(
+        temp.path(),
+        &[
+            "option",
+            "select",
+            "side-opt",
+            "--by",
+            "test",
+            "--rationale",
+            "r",
+        ],
+    )?;
+    run_research(
+        temp.path(),
+        &[
+            "experiment",
+            "create",
+            "side-exp",
+            "--branch",
+            "side",
+            "--option",
+            "side-opt",
+            "--mode",
+            "exploration",
+            "--observation-goal",
+            "see something",
+            "--setup",
+            "s",
+            "--primary-metric",
+            "m",
+        ],
+    )?;
+
+    // context on `main` must still reveal that `side` exists, with its question
+    let ctx = run_research(temp.path(), &["context"])?;
+    assert!(
+        ctx.contains("Program Branches"),
+        "no branch overview:\n{ctx}"
+    );
+    assert!(ctx.contains("side"), "other branch not listed:\n{ctx}");
+    assert!(
+        ctx.contains("side question?"),
+        "other branch's question hidden:\n{ctx}"
+    );
+    assert!(
+        ctx.contains("branch set-current side"),
+        "no switch hint:\n{ctx}"
+    );
+
+    // a terminal status reached via `update` answers the linked option, as `complete` would
+    run_research(
+        temp.path(),
+        &[
+            "experiment",
+            "update",
+            "side-exp",
+            "--branch",
+            "side",
+            "--status",
+            "running",
+        ],
+    )?;
+    let out = run_research(
+        temp.path(),
+        &[
+            "experiment",
+            "update",
+            "side-exp",
+            "--branch",
+            "side",
+            "--status",
+            "failed",
+        ],
+    )?;
+    assert!(
+        out.contains("answered option side-opt"),
+        "option left stale:\n{out}"
+    );
+    Ok(())
+}

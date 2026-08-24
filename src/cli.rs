@@ -605,6 +605,43 @@ fn handle_context(db: &Path, policy: &Path, enable_graph_reasoning: bool) -> any
         }
     };
 
+    // Every branch of the program, so a cold start can never miss that others exist.
+    if let Some(program) = current_program.as_ref() {
+        let branches = crate::db::list_branches(&conn, program.id)?;
+        if branches.len() > 1 {
+            println!();
+            println!("Program Branches ({}):", branches.len());
+            for branch in &branches {
+                let here = policy_doc.current_branch.as_deref() == Some(branch.slug.as_str());
+                let experiments = crate::db::list_experiments(&conn, branch.id)?;
+                let mut done = 0usize;
+                let mut open = 0usize;
+                for experiment in &experiments {
+                    match experiment.status.as_str() {
+                        "planned" | "running" => open += 1,
+                        _ => done += 1,
+                    }
+                }
+                println!(
+                    "{} {} [{}] — {} experiments ({} terminal, {} in flight)",
+                    if here { "*" } else { " " },
+                    branch.slug,
+                    branch.status,
+                    experiments.len(),
+                    done,
+                    open
+                );
+                if !here {
+                    println!("    question: {}", branch.question);
+                    println!(
+                        "    switch: ldgr research branch set-current {}",
+                        branch.slug
+                    );
+                }
+            }
+        }
+    }
+
     println!();
     println!("Current Branch:");
     let current_branch = match (&current_program, policy_doc.current_branch.as_deref()) {
@@ -1567,6 +1604,35 @@ fn handle_experiment(db: &Path, policy: &Path, args: ExperimentArgs) -> anyhow::
                         status,
                     },
                 )?;
+                // A terminal status reached through `update` must have the same effect on the
+                // linked option as one reached through `complete`/`submit`; otherwise the two
+                // paths leave the ledger in different states and options go stale.
+                if let Some(status) = status {
+                    let terminal = !matches!(
+                        status,
+                        crate::schema::ExperimentStatus::Planned
+                            | crate::schema::ExperimentStatus::Running
+                    );
+                    if terminal {
+                        if let Some(option_id) = experiment.option_id {
+                            let option = crate::db::get_research_option_by_id(&conn, option_id)?;
+                            if matches!(option.status.as_str(), "open" | "selected" | "in_progress")
+                            {
+                                let option = crate::db::update_research_option_status(
+                                    &conn,
+                                    option.id,
+                                    crate::schema::ResearchOptionStatus::Answered,
+                                )?;
+                                println!("answered option {}", option.slug);
+                            }
+                        }
+                        if status == crate::schema::ExperimentStatus::Completed {
+                            println!(
+                                "note: `experiment complete` also runs readiness validation; `update --status completed` skips it"
+                            );
+                        }
+                    }
+                }
                 println!(
                     "updated experiment {} [{}]",
                     experiment.slug, experiment.status
