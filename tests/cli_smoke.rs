@@ -117,7 +117,32 @@ fn adapter_install_materializes_research_bundle() -> anyhow::Result<()> {
             .and(predicate::str::contains("ldgr research --help")),
     );
 
-    assert!(install_root.join("adapter.toml").is_file());
+    let manifest_path = install_root.join("adapter.toml");
+    assert!(manifest_path.is_file());
+    let manifest: toml::Value = toml::from_str(&fs::read_to_string(&manifest_path)?)?;
+    assert!(Path::new(
+        manifest["commands"][0]["argv"][0]
+            .as_str()
+            .expect("research command argv")
+    )
+    .is_absolute());
+    let compatibility: serde_json::Value =
+        serde_json::from_slice(&fs::read(install_root.join("adapter-compatibility.json"))?)?;
+    assert_eq!(compatibility["format"], "ldgr.adapter-compatibility.v2");
+    assert_eq!(
+        compatibility["compatibility"]["central_components"],
+        serde_json::json!([])
+    );
+    assert_eq!(
+        compatibility["compatibility"]["required_core_capabilities"],
+        serde_json::json!(["prompt.v1", "telemetry.v1", "work.v1"])
+    );
+    assert_eq!(compatibility["local_stores"][0]["engine"], "sqlite");
+    assert_eq!(compatibility["local_stores"][0]["store_id"], "research");
+    assert_eq!(compatibility["local_stores"][0]["schema_version"], 4);
+    assert!(install_root
+        .join("adapter-database-contract.json")
+        .is_file());
     assert!(install_root.join("loop-prompt.md").is_file());
     assert!(install_root.join("prompts/research-loop.md").is_file());
     assert!(install_root.join("adapter-resources.json").is_file());

@@ -9,25 +9,41 @@ The adapter is publication-ready as an alpha: workflows and schemas may still ev
 
 The research layer uses a proven workflow: programs contain branches, branches contain selectable research options/hypotheses, and selected options become bounded experiments with runs, metrics, artifacts, decisions, facts, and follow-up options.
 
-## Install from GitHub
+## Canonical installation
+
+Start with LDGR Core and install Research through Core's authenticated adapter
+catalog and discovery surface:
 
 ```sh
-cargo install --git https://github.com/hydra-dynamix/ldgr-research ldgr-research
-```
-
-Install the adapter bundle and use the canonical LDGR dispatch surface:
-
-```sh
-ldgr-research install
-ldgr research --help
+ldgr adapter install research
+ldgr research install
+ldgr research workflow
 ldgr research init
-ldgr research status
-ldgr research loop run
+ldgr research doctor
 ```
 
-This follows the `ldgr-conduct` adapter pattern: the adapter binary owns install/init/resources/workflows, while LDGR core owns adapter discovery and dispatch through `adapter.toml`. `ldgr-research adapter install` is the installer entrypoint used by LDGR core; humans can run `ldgr-research install`.
+Do not install or invoke a standalone `ldgr-research` binary to bootstrap a
+missing/stale bundle. `ldgr adapter install research` authenticates the signed
+catalog, selects a compatibility-v2 artifact for the active Core profile,
+verifies the archive and staged sidecar, writes the receipt, and registers an
+absolute adapter command. `ldgr research install` then idempotently materializes
+the Research-owned prompt and skills through that discovered command. It must
+not rewrite Core's signed-release receipt.
 
-`ldgr-research install` materializes adapter resources under `~/.ldgr/adapters/research`, then copies the research prompt and adapter-owned skills into the paths declared by configured harness entries in `~/.ldgr/config.json`. With no harness config, it uses the Pi-compatible defaults `~/.ldgr/prompts` and `~/.pi/agent/skills`. The research adapter does not install harness extensions; install also removes stale `ldgr-research.ts` copies left by older releases. `ldgr-research init` initializes project research state and imports/activates the `research-loop` prompt in the project core LDGR database. `ldgr-research loop run` and `ldgr research loop run` forward to `ldgr loop run` and automatically supply `--prompt-slug research-loop` when research mode is enabled and no explicit prompt source is provided.
+Run `workflow` before project mutation to read the installed adapter workflow.
+`init` creates or migrates `.ldgr/research/research.db` and imports/activates the
+`research-loop` prompt in `.ldgr/ldgr.db`; `doctor` verifies both stores and the
+configuration. Repeat `init` for each project. There is no separate profile
+step.
+
+Research follows the `ldgr-conduct` ownership pattern: the adapter owns its
+install/init/resources/workflow behavior and local Research database, while
+Core owns catalog verification, bundle discovery, compatibility evaluation, and
+dispatch through `adapter.toml`. The adapter copies resources into configured
+harness paths in canonical `~/.ldgr/config.toml` (with `config.json` retained as
+a legacy mirror). With no harness config, Pi-compatible defaults are
+`~/.ldgr/prompts` and `~/.pi/agent/skills`. The adapter does not install harness
+extensions and removes stale `ldgr-research.ts` copies from older releases.
 
 ## Research overlay mode
 
@@ -56,9 +72,11 @@ ldgr research core artifact add <run-id> --kind report --path <path> --descripti
 
 ## Agent quickstart
 
-Agents should start from the project root with:
+After the canonical installation, agents should start from the project root
+with:
 
 ```sh
+ldgr research workflow
 ldgr research init
 ldgr research agent-guide
 ldgr research doctor
@@ -260,9 +278,49 @@ ldgr research mode <status|enable|disable>
 ldgr research core <ldgr-command>
 ```
 
-By default, adapter bundle files are materialized under `LDGR_HOME/adapters/research` or `~/.ldgr/adapters/research`. Install also copies prompt files and adapter-owned skills into configured harness paths. Codex harness entries use `~/.codex/prompts` and `~/.codex/skills`; Pi defaults use `~/.ldgr/prompts` and `~/.pi/agent/skills`. The same bundle layout is used by `ldgr adapter install research`, so core adapter installation also installs prompts and skills.
+By default, Core materializes the adapter bundle under
+`LDGR_HOME/adapters/research` or `~/.ldgr/adapters/research`. The adapter
+installer copies prompt files and adapter-owned skills into configured harness
+paths. Codex harness entries use `~/.codex/prompts` and `~/.codex/skills`; Pi
+defaults use `~/.ldgr/prompts` and `~/.pi/agent/skills`.
 
-There is no separate profile step. Install the adapter once, initialize each project with `ldgr research init`, then use the canonical `ldgr research <command>` control surface.
+The direct `ldgr-research install` and `ldgr-research adapter install` entrypoints
+remain for adapter development and for Core to invoke internally. They are not
+the supported first-install or repair path. Operators install the adapter once
+with `ldgr adapter install research`, initialize each project with
+`ldgr research init`, then use the canonical `ldgr research <command>` control
+surface.
+
+## Compatibility and repair
+
+Research's compatibility-v2 sidecar declares protocol epoch 1, minimum Core
+schema 5, Core capabilities `prompt.v1`, `telemetry.v1`, and `work.v1`, no
+central component, and one adapter-local SQLite store. Its local migration
+digest and schema version describe `.ldgr/research/research.db`; they are not
+part of the central database contract or the release-index compatibility
+fingerprint. A Research-local schema change therefore does not require exact
+global release-set identity and cannot invalidate an unrelated adapter.
+
+Diagnose an unavailable namespace through Core:
+
+```sh
+ldgr adapter list
+ldgr adapter show research --json
+ldgr update --adapter research
+ldgr adapter show research --json
+```
+
+A valid v2 install is `ready`. An exact historical v1 install may be `degraded`
+with a warning. Stale v1 metadata remains visible as `blocked` with
+`compatibility.legacy_global_contract_mismatch` or
+`compatibility.legacy_core_schema_mismatch`; malformed metadata is `invalid`.
+Use the exact `repair.command` emitted by Core. Do not copy a global hash into
+`adapter-database-contract.json`, delete the v2 sidecar to force legacy
+fallback, or run a standalone binary to rewrite the installed bundle.
+
+After repair, run the complete canonical sequence again. `ldgr research install`
+is idempotent, and `ldgr research doctor` verifies the adapter-owned local
+migration and Core-owned prompt activation.
 
 ## Campaign workflow
 
