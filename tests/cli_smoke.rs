@@ -1540,3 +1540,70 @@ fn context_lists_all_branches_and_terminal_update_answers_option() -> anyhow::Re
     );
     Ok(())
 }
+
+/// stderr of a command expected to FAIL, for asserting on guidance messages.
+fn run_research_expect_failure(cwd: &Path, args: &[&str]) -> anyhow::Result<String> {
+    let output = research_command()?.current_dir(cwd).args(args).output()?;
+    anyhow::ensure!(
+        !output.status.success(),
+        "ldgr-research {} unexpectedly succeeded\nstdout:\n{}",
+        args.join(" "),
+        String::from_utf8_lossy(&output.stdout)
+    );
+    Ok(String::from_utf8_lossy(&output.stderr).into_owned())
+}
+
+#[test]
+fn artifact_add_refuses_empty_files_but_allows_an_explicit_override() -> anyhow::Result<()> {
+    // An artifact backs a fact, so a zero-byte file is exactly the failure the evidence gate
+    // exists to prevent: it registers cleanly and its checksum is the digest of the empty
+    // string, so nothing downstream notices that the evidence is vacuous.
+    let temp = TempDir::new()?;
+    fs::create_dir_all(temp.path().join("output"))?;
+    run_research(temp.path(), &["init"])?;
+    fs::write(temp.path().join("output").join("empty.txt"), b"")?;
+
+    let stderr = run_research_expect_failure(
+        temp.path(),
+        &["artifact", "add", "1", "output/empty.txt", "--kind", "report", "--checksum"],
+    )?;
+    assert!(
+        stderr.contains("is empty (0 bytes)"),
+        "error should name the emptiness, got: {stderr}"
+    );
+    assert!(
+        stderr.contains("--allow-empty"),
+        "error should name the escape hatch, got: {stderr}"
+    );
+    Ok(())
+}
+
+#[test]
+fn evidence_artifact_rejects_a_path_with_actionable_guidance() -> anyhow::Result<()> {
+    // Passing a path to --evidence-artifact is a natural mistake. The error should say what is
+    // wanted and how to obtain it, rather than surfacing a raw integer-parse failure.
+    let temp = TempDir::new()?;
+    fs::create_dir_all(temp.path().join("output"))?;
+    run_research(temp.path(), &["init"])?;
+    run_research(
+        temp.path(),
+        &["program", "create", "demo", "--title", "Demo", "--objective", "Exercise the guard"],
+    )?;
+
+    let stderr = run_research_expect_failure(
+        temp.path(),
+        &[
+            "fact", "add", "some-fact", "--program", "demo", "--status", "candidate",
+            "--statement", "s", "--evidence-artifact", "output/report.txt",
+        ],
+    )?;
+    assert!(
+        stderr.contains("expects an artifact id"),
+        "error should say an id is wanted, got: {stderr}"
+    );
+    assert!(
+        stderr.contains("artifact add"),
+        "error should show how to register it, got: {stderr}"
+    );
+    Ok(())
+}

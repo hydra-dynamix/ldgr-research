@@ -1872,6 +1872,7 @@ fn handle_artifact(db: &Path, policy: &Path, args: ArtifactArgs) -> anyhow::Resu
         ArtifactCommand::Add(args) => {
             let policy_doc = crate::policy::load_policy(policy)?;
             validate_artifact_path(&args.path, &policy_doc.allowed_artifact_roots)?;
+            check_artifact_content(&args.path, &args.kind, args.allow_empty)?;
             let run_id = parse_id(&args.run_id, "run id")?;
             let checksum = if args.checksum {
                 compute_sha256(&args.path)?
@@ -3781,6 +3782,27 @@ fn resolve_branch_for_program(
     Ok(Some(require_branch(conn, program_id, branch_slug)?))
 }
 
+/// `--evidence-artifact` takes the integer id of an artifact already registered against a run,
+/// not a path.  Passing a path is a natural mistake, so say what is wanted and how to get it
+/// rather than surfacing a raw integer-parse failure.
+fn parse_artifact_reference(value: &str) -> anyhow::Result<i64> {
+    if let Ok(id) = value.parse::<i64>() {
+        return Ok(id);
+    }
+    let looks_like_path = value.contains('/') || value.contains('\\') || value.contains('.');
+    if looks_like_path {
+        bail!(
+            "--evidence-artifact expects an artifact id (an integer), but got `{value}`, which looks like a path.
+  Artifacts are registered against a run first:
+    ldgr-research artifact add <run-id> {value} --kind <kind> --checksum
+  then pass the id it reports, or find it with `ldgr-research artifact list`."
+        );
+    }
+    bail!(
+        "--evidence-artifact expects an artifact id (an integer), but got `{value}`. List registered artifacts with `ldgr-research artifact list`."
+    )
+}
+
 fn parse_id(value: &str, name: &str) -> anyhow::Result<i64> {
     value
         .parse::<i64>()
@@ -3806,7 +3828,7 @@ fn evidence_from_creation_args<'a>(
         None => None,
     };
     let artifact_id = match artifact {
-        Some(value) => Some(parse_id(value, "artifact id")?),
+        Some(value) => Some(parse_artifact_reference(value)?),
         None => None,
     };
     let (report_path, report_anchor) = split_report_reference(report);
@@ -4029,6 +4051,42 @@ fn validate_artifact_path(path: &Path, allowed_roots: &[String]) -> anyhow::Resu
         allowed_roots.join(", ")
     )
 }
+
+/// Guard against registering empty or truncated files as evidence.
+///
+/// An artifact backs a fact, so a zero-byte file is the exact failure the evidence gate exists
+/// to prevent: it registers cleanly, its SHA-256 is the well-known digest of the empty string,
+/// and nothing downstream notices.  This was observed in practice when a capture step produced
+/// no output and the resulting empty file was accepted as evidence for an accepted fact.
+fn check_artifact_content(
+    path: &Path,
+    kind: &ArtifactKind,
+    allow_empty: bool,
+) -> anyhow::Result<()> {
+    if !path.exists() {
+        return Ok(()); // absence is reported separately by compute_sha256
+    }
+    let len = fs::metadata(path)
+        .with_context(|| format!("failed to stat artifact {}", path.display()))?
+        .len();
+    if len == 0 && !allow_empty {
+        bail!(
+            "artifact {} is empty (0 bytes); an empty file cannot support a fact. Check that whatever produced it actually wrote output, or pass --allow-empty if the emptiness is itself the result.",
+            path.display()
+        );
+    }
+    if len > 0 && len < MIN_MEANINGFUL_REPORT_BYTES && matches!(kind, ArtifactKind::Report) {
+        eprintln!(
+            "warning: artifact {} is only {} bytes for kind `report`; this is usually a truncated or failed capture",
+            path.display(),
+            len
+        );
+    }
+    Ok(())
+}
+
+/// Reports shorter than this are almost always truncated captures rather than real reports.
+const MIN_MEANINGFUL_REPORT_BYTES: u64 = 200;
 
 fn compute_sha256(path: &Path) -> anyhow::Result<Option<String>> {
     if !path.exists() {
@@ -4668,6 +4726,10 @@ pub struct ArtifactAdd {
     pub description: Option<String>,
     #[arg(long)]
     pub checksum: bool,
+    /// Register the artifact even though the file is empty. Use only when the emptiness is
+    /// itself the finding; an empty file cannot otherwise support a fact.
+    #[arg(long)]
+    pub allow_empty: bool,
 }
 
 #[derive(Clone, Debug, ValueEnum)]

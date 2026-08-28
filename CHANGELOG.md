@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Fixed
+
+- `artifact add` now refuses a zero-byte file instead of registering it silently. An artifact
+  backs a fact, so an empty file is exactly the failure the evidence gate exists to prevent: it
+  registered cleanly and its checksum came back as the SHA-256 of the empty string, leaving a
+  fact supported by nothing. Observed in practice when a capture step produced no output. Pass
+  `--allow-empty` when the emptiness is itself the result. Artifacts of kind `report` under 200
+  bytes now warn, since a report that short is almost always a truncated capture.
+- `fact add --evidence-artifact` now explains that it wants an artifact id (an integer) and
+  shows how to obtain one, instead of failing with `invalid digit found in string`. Passing a
+  path is a natural mistake, and the previous error named neither the expected type nor the
+  `artifact add` step that produces it.
+
+
 ### Added
 
 - `context` now lists **every branch of the program** (status, experiment counts, and for
