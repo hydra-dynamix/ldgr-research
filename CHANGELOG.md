@@ -16,6 +16,25 @@
   `artifact add` step that produces it.
 
 
+- The ledger is now located from any subdirectory of the project, the way git finds `.git/`.
+  Previously the default paths were resolved against the working directory, so running from a
+  subdirectory failed with a raw SQLite `unable to open database file`, which reads like
+  corruption rather than "you are in the wrong directory"; it cost a lost experiment
+  registration in real use. An explicit `--db`/`--policy`/`--tools` is still honoured as given.
+- A missing ledger now explains itself and names `ldgr-research init`, instead of surfacing the
+  SQLite error.
+- `fact add` without evidence now shows the `run start` / `artifact add` sequence that yields an
+  artifact id, rather than only listing the flag names.
+
+### Added
+
+- `ldgr-research next` reports where the ledger currently stands (program, branch, open runs,
+  experiments awaiting a verdict, facts awaiting review) and prints the exact commands for the
+  next step. `agent-guide` documents the canonical flow as static text; the gap it left was that
+  a newcomer, or an agent resuming work, could not tell which step *this* project was on. The
+  dependency chain experiment -> run -> artifact -> fact is what makes the evidence gate work,
+  but it was undiscoverable when every error reported only its own missing argument.
+
 ### Added
 
 - `context` now lists **every branch of the program** (status, experiment counts, and for

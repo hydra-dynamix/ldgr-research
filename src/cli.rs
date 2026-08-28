@@ -118,15 +118,65 @@ pub enum Command {
     Migrate,
     /// Diagnose local research ledger setup.
     Doctor,
+    /// Show where this ledger currently stands and what to do next.
+    Next,
+}
+
+
+/// Locate the project ledger from anywhere inside the project, the way git finds `.git/`.
+///
+/// The default paths are relative to the working directory, so invoking the CLI from a
+/// subdirectory previously failed with a raw SQLite "unable to open database file" error, which
+/// reads like corruption rather than "you are in the wrong directory". Only the untouched
+/// defaults are redirected; an explicit `--db`/`--policy`/`--tools` is always honoured as given.
+fn resolve_project_paths(cli: &mut Cli) {
+    if cli.db != PathBuf::from(DEFAULT_DB) || cli.db.exists() {
+        return; // explicit override, or the ledger is already right here
+    }
+    let Ok(cwd) = std::env::current_dir() else {
+        return;
+    };
+    for ancestor in cwd.ancestors().skip(1) {
+        let candidate = ancestor.join(DEFAULT_DB);
+        if candidate.exists() {
+            cli.db = candidate;
+            if cli.policy == PathBuf::from(DEFAULT_POLICY) {
+                cli.policy = ancestor.join(DEFAULT_POLICY);
+            }
+            if cli.tools == PathBuf::from(DEFAULT_TOOLS) {
+                cli.tools = ancestor.join(DEFAULT_TOOLS);
+            }
+            return;
+        }
+    }
 }
 
 pub fn run() -> anyhow::Result<()> {
-    let cli = Cli::parse();
+    let mut cli = Cli::parse();
+    resolve_project_paths(&mut cli);
+    // `init` creates the ledger, and a few commands are pure text; everything else needs one.
+    if !matches!(
+        cli.command,
+        Command::Init | Command::AgentGuide | Command::Workflow | Command::Doctor
+    ) && !cli.db.exists()
+    {
+        let here = std::env::current_dir()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|_| "the working directory".to_owned());
+        bail!(
+            "no research ledger at {} (looked in {} and every parent directory).
+  New project?           ldgr-research init
+  Ledger somewhere else? cd to the project root, or pass --db <path>",
+            cli.db.display(),
+            here
+        );
+    }
 
     match cli.command {
         Command::Init => init_project(&cli.db, &cli.policy, &cli.tools),
         Command::Context => handle_context(&cli.db, &cli.policy, cli.enable_graph_reasoning),
         Command::AgentGuide => handle_agent_guide(),
+        Command::Next => handle_next(&cli.db, &cli.policy),
         Command::Workflow => handle_workflow(),
         Command::Mode(args) => handle_mode(&cli.policy, args),
         Command::Core(args) => pass_through_core(&args.argv),
@@ -304,6 +354,98 @@ const RESEARCH_WORKFLOW: &str = include_str!("../workflows/research.md");
 
 fn handle_workflow() -> anyhow::Result<()> {
     print!("{RESEARCH_WORKFLOW}");
+    Ok(())
+}
+
+
+/// Report where this ledger stands and the next action, resolved against the live database.
+///
+/// `agent-guide` documents the canonical flow as static text; the gap it leaves is that a
+/// newcomer (or an agent resuming work) cannot tell which step *this* project is on. The
+/// dependency chain experiment -> run -> artifact -> fact is what makes the evidence gate work,
+/// but it is undiscoverable when every error reports only its own missing argument.
+fn handle_next(db: &Path, policy: &Path) -> anyhow::Result<()> {
+    let conn = crate::db::open_database(db)?;
+    let policy_doc = crate::policy::load_policy(policy)?;
+    println!("Ledger: {}", db.display());
+
+    let program = policy_doc.current_program.as_deref();
+    let branch = policy_doc.current_branch.as_deref();
+    match program {
+        Some(p) => println!("Program: {p}"),
+        None => {
+            println!("Program: (none set)");
+            println!("
+Next: ldgr-research program create <slug> --title <t> --objective <o>");
+            println!("      ldgr-research program set-current <slug>");
+            return Ok(());
+        }
+    }
+    match branch {
+        Some(b) => println!("Branch:  {b}"),
+        None => {
+            println!("Branch:  (none set)");
+            println!("
+Next: ldgr-research branch create <slug> --program {} --title <t> \\", program.unwrap_or("<program>"));
+            println!("              --question <q> --rationale <r>");
+            return Ok(());
+        }
+    }
+
+    let open_runs: Vec<(i64, String)> = conn
+        .prepare("SELECT r.id, e.slug FROM run r JOIN experiment e ON e.id = r.experiment_id                   WHERE r.status = 'running' ORDER BY r.id DESC LIMIT 5")?
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+        .collect::<Result<_, _>>()?;
+    let awaiting: Vec<String> = conn
+        .prepare("SELECT slug FROM experiment WHERE status IN ('submitted','running')                   ORDER BY id DESC LIMIT 5")?
+        .query_map([], |row| row.get(0))?
+        .collect::<Result<_, _>>()?;
+    let needs_review: i64 = conn
+        .query_row("SELECT COUNT(*) FROM fact WHERE review_state = 'needs_review'", [], |r| r.get(0))
+        .unwrap_or(0);
+
+    println!();
+    if !open_runs.is_empty() {
+        println!("Open runs:");
+        for (id, slug) in &open_runs {
+            println!("  run {id} on {slug}");
+        }
+        let (id, _) = &open_runs[0];
+        println!("
+Next, for run {id}:");
+        println!("  ldgr-research artifact add {id} <path> --kind <kind> --checksum");
+        println!("  ldgr-research run note {id} --body <text>");
+        println!("  ldgr-research run finish {id} --status success");
+        return Ok(());
+    }
+    if !awaiting.is_empty() {
+        println!("Experiments awaiting a run or verdict:");
+        for slug in &awaiting {
+            println!("  {slug}");
+        }
+        println!("
+Next, for {}:", awaiting[0]);
+        println!("  ldgr-research run start {} --command <cmd>", awaiting[0]);
+        println!("  ldgr-research experiment verdict {} --outcome pass|fail --statement <why>", awaiting[0]);
+        return Ok(());
+    }
+    if needs_review > 0 {
+        println!("{needs_review} fact(s) awaiting review.");
+        println!("
+Next:");
+        println!("  ldgr-research fact list --program {}", program.unwrap_or("<program>"));
+        println!("  ldgr-research fact update <slug> --status accepted --reviewed-by <who>");
+        return Ok(());
+    }
+    println!("Nothing open.");
+    println!("
+Next: register the experiment BEFORE running it, so its criteria are pre-committed:");
+    println!("  ldgr-research experiment create <slug> --branch {} --mode falsification \\", branch.unwrap_or("<branch>"));
+    println!("          --hypothesis <h> --pass <criteria> --fail <criteria>");
+    println!("  ldgr-research run start <slug> --command <cmd>");
+    println!("
+The chain experiment -> run -> artifact -> fact is enforced: a fact needs an");
+    println!("artifact for evidence, and an artifact needs a run to attach to.");
     Ok(())
 }
 
@@ -3819,7 +3961,13 @@ fn evidence_from_creation_args<'a>(
     summary: &'a str,
 ) -> anyhow::Result<crate::schema::NewEvidenceLink<'a>> {
     if experiment.is_none() && artifact.is_none() && report.is_none() {
-        bail!("fact add requires --evidence-experiment, --evidence-artifact, or --evidence-report");
+        bail!(
+            "a fact needs evidence: pass --evidence-experiment <slug>, --evidence-artifact <id>, or --evidence-report <path>.
+  To attach a file as evidence, register it against a run first:
+    ldgr-research run start <experiment> --command <cmd>
+    ldgr-research artifact add <run-id> <path> --kind report --checksum
+  then pass the artifact id it prints. `ldgr-research next` shows where you are."
+        );
     }
     let experiment_id = match experiment {
         Some(value) => Some(resolve_experiment_reference(

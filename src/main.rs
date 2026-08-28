@@ -579,6 +579,7 @@ fn is_research_command(command: &str) -> bool {
         command,
         "init"
             | "context"
+            | "next"
             | "agent-guide"
             | "workflow"
             | "mode"

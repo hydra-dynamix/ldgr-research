@@ -1607,3 +1607,75 @@ fn evidence_artifact_rejects_a_path_with_actionable_guidance() -> anyhow::Result
     );
     Ok(())
 }
+
+#[test]
+fn ledger_is_found_from_a_subdirectory() -> anyhow::Result<()> {
+    // The default paths are relative to the working directory, so running from a subdirectory
+    // used to fail with a raw SQLite "unable to open database file", which reads like
+    // corruption rather than "you are in the wrong directory". Resolve upward, as git does.
+    let temp = TempDir::new()?;
+    fs::create_dir_all(temp.path().join("output"))?;
+    run_research(temp.path(), &["init"])?;
+    let nested = temp.path().join("experiments").join("deep").join("deeper");
+    fs::create_dir_all(&nested)?;
+
+    let stdout = run_research(&nested, &["next"])?;
+    assert!(
+        stdout.contains("Ledger:"),
+        "next should resolve the ledger from a subdirectory, got: {stdout}"
+    );
+    Ok(())
+}
+
+#[test]
+fn missing_ledger_explains_itself_instead_of_leaking_sqlite() -> anyhow::Result<()> {
+    let temp = TempDir::new()?;
+    let stderr = run_research_expect_failure(temp.path(), &["next"])?;
+    assert!(
+        stderr.contains("no research ledger at"),
+        "should name the missing ledger, got: {stderr}"
+    );
+    assert!(
+        stderr.contains("ldgr-research init"),
+        "should say how to create one, got: {stderr}"
+    );
+    assert!(
+        !stderr.contains("unable to open database file"),
+        "should not leak the raw SQLite error, got: {stderr}"
+    );
+    Ok(())
+}
+
+#[test]
+fn next_reports_position_and_names_the_following_command() -> anyhow::Result<()> {
+    let temp = TempDir::new()?;
+    fs::create_dir_all(temp.path().join("output"))?;
+    run_research(temp.path(), &["init"])?;
+
+    // With no program set, `next` should say how to create one.
+    let stdout = run_research(temp.path(), &["next"])?;
+    assert!(
+        stdout.contains("program create"),
+        "next should name the first step on an empty ledger, got: {stdout}"
+    );
+    Ok(())
+}
+
+#[test]
+fn fact_add_without_evidence_names_how_to_obtain_some() -> anyhow::Result<()> {
+    let temp = TempDir::new()?;
+    fs::create_dir_all(temp.path().join("output"))?;
+    run_research(temp.path(), &["init"])?;
+    run_research(
+        temp.path(),
+        &["program", "create", "demo", "--title", "Demo", "--objective", "Exercise the guard"],
+    )?;
+
+    let stderr = run_research_expect_failure(
+        temp.path(),
+        &["fact", "add", "f", "--program", "demo", "--status", "candidate", "--statement", "s"],
+    )?;
+    assert!(stderr.contains("a fact needs evidence"), "got: {stderr}");
+    assert!(stderr.contains("artifact add"), "should name the step that yields an id: {stderr}");
+    Ok(())
+}
