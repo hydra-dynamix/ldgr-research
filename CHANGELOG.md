@@ -2,6 +2,83 @@
 
 ## Unreleased
 
+### Fixed
+
+- `artifact add` now refuses a zero-byte file instead of registering it silently. An artifact
+  backs a fact, so an empty file is exactly the failure the evidence gate exists to prevent: it
+  registered cleanly and its checksum came back as the SHA-256 of the empty string, leaving a
+  fact supported by nothing. Observed in practice when a capture step produced no output. Pass
+  `--allow-empty` when the emptiness is itself the result. Artifacts of kind `report` under 200
+  bytes now warn, since a report that short is almost always a truncated capture.
+- `fact add --evidence-artifact` now explains that it wants an artifact id (an integer) and
+  shows how to obtain one, instead of failing with `invalid digit found in string`. Passing a
+  path is a natural mistake, and the previous error named neither the expected type nor the
+  `artifact add` step that produces it.
+
+
+- The ledger is now located from any subdirectory of the project, the way git finds `.git/`.
+  Previously the default paths were resolved against the working directory, so running from a
+  subdirectory failed with a raw SQLite `unable to open database file`, which reads like
+  corruption rather than "you are in the wrong directory"; it cost a lost experiment
+  registration in real use. An explicit `--db`/`--policy`/`--tools` is still honoured as given.
+- A missing ledger now explains itself and names `ldgr-research init`, instead of surfacing the
+  SQLite error.
+- `fact add` without evidence now shows the `run start` / `artifact add` sequence that yields an
+  artifact id, rather than only listing the flag names.
+
+### Added
+
+- `ldgr-research next` reports where the ledger currently stands (program, branch, open runs,
+  experiments awaiting a verdict, facts awaiting review) and prints the exact commands for the
+  next step. `agent-guide` documents the canonical flow as static text; the gap it left was that
+  a newcomer, or an agent resuming work, could not tell which step *this* project was on. The
+  dependency chain experiment -> run -> artifact -> fact is what makes the evidence gate work,
+  but it was undiscoverable when every error reported only its own missing argument.
+
+### Added
+
+- `context` now lists **every branch of the program** (status, experiment counts, and for
+  non-current branches the branch question and a switch hint) whenever the program has more
+  than one. Previously the cockpit was scoped entirely to the current branch, so a session
+  resuming on one branch had no signal that work on another existed at all.
+- Evidence provenance: `fact add --source primary|secondary|derived` records whether a
+  claim rests on a source read directly, on someone else's report of it (tool summaries,
+  subagent findings), or on our own computation. A fact resting on `secondary` evidence
+  cannot be `accepted` — it must be re-checked against the primary source and promoted
+  with `fact update --source primary`. Added after a false claim about a third party's
+  documentation, sourced from an automated page summary, reached publication.
+- Pre-registration hashes: `experiment create` records a canonical SHA-256 of the
+  falsifiable definition (hypothesis, setup, metrics, pass/fail criteria), and the
+  new `experiment verdict <slug> --outcome pass|fail|inconclusive` records outcomes
+  against the frozen criteria, refusing on definition drift unless `--allow-drift`.
+- Adversarial review as a first-class flow: `experiment create --attacks-fact <slug>`
+  links an attack experiment to a claim; a `pass` verdict automatically marks the
+  attacked fact `contested` and flags it for review.
+- `fact impact <slug>`: the downstream blast radius of a fact - attacking
+  experiments and slug mentions across facts and experiment definitions.
+- Optional review gate: policy `require_review_for_fact_acceptance: true` makes
+  `accepted` facts require `--reviewed-by <identity>`; `fact add` now accepts
+  `--reviewed-by` and marks the fact reviewed.
+- `run note <id> --body` / `run notes <id>`: timestamped incremental evidence
+  attached to research runs.
+- `--branch` overrides on experiment show/update/complete/submit/verdict, run
+  start/list, metric list, artifact list, and decision add - no more
+  `branch set-current` dance for cross-branch operations.
+- Artifact kinds `log`, `code`, and `data`.
+
+### Changed
+
+- Graph reasoning is now ON by default (policy `graph_reasoning_enabled: true`;
+  disable via policy or override with `--enable-graph-reasoning`), and the agent
+  guide documents the verdict/adversarial/impact/graph surface.
+- `run finish --status failed` is accepted and routed through the fail path.
+- `experiment update --status <terminal>` now answers the linked research option, matching
+  `experiment complete` and `experiment submit`. Previously two paths reached the same
+  terminal state with different side effects, leaving options stale and the "recommended next
+  option" pointing at finished work. Updating to `completed` this way also now notes that it
+  skips the readiness validation `experiment complete` performs.
+- `metric add` accepts negative values without the `--` escape.
+
 ### Changed
 
 - Stop shipping the Pi `ldgr-research.ts` extension and remove stale research

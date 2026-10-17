@@ -32,6 +32,8 @@ allowed_artifact_roots:
   - experiments/
 review_thresholds:
   contested_fact_counterevidence_count: 1
+require_review_for_fact_acceptance: false
+graph_reasoning_enabled: true
 recommendation:
   prefer_classifications:
     - main_path
@@ -63,6 +65,12 @@ pub struct Policy {
     pub allowed_artifact_roots: Vec<String>,
     #[serde(default)]
     pub review_thresholds: ReviewThresholds,
+    /// When true, promoting a fact to `accepted` requires --reviewed-by.
+    #[serde(default)]
+    pub require_review_for_fact_acceptance: bool,
+    /// Graph reasoning membrane availability (on by default; disable to opt out).
+    #[serde(default = "default_true")]
+    pub graph_reasoning_enabled: bool,
     #[serde(default)]
     pub recommendation: RecommendationPolicy,
     #[serde(flatten)]

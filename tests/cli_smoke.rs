@@ -1113,3 +1113,640 @@ fn fake_ldgr(dir: &Path, args_log: Option<&Path>, stdout_line: &str) -> anyhow::
 fn make_executable(_path: &Path) -> anyhow::Result<()> {
     Ok(())
 }
+
+#[test]
+fn preregistration_verdicts_review_gate_and_run_notes() -> anyhow::Result<()> {
+    let temp = TempDir::new()?;
+    fs::create_dir_all(temp.path().join("output"))?;
+    run_research(temp.path(), &["init"])?;
+    run_research(
+        temp.path(),
+        &[
+            "program",
+            "create",
+            "demo",
+            "--title",
+            "Demo",
+            "--objective",
+            "Verdict flow",
+        ],
+    )?;
+    run_research(temp.path(), &["program", "set-current", "demo"])?;
+    run_research(
+        temp.path(),
+        &[
+            "branch",
+            "create",
+            "main",
+            "--program",
+            "demo",
+            "--title",
+            "Main",
+            "--question",
+            "Q?",
+            "--rationale",
+            "R",
+        ],
+    )?;
+    run_research(temp.path(), &["branch", "set-current", "main"])?;
+
+    // a claim to attack
+    run_research(
+        temp.path(),
+        &[
+            "fact",
+            "add",
+            "shaky-claim",
+            "--program",
+            "demo",
+            "--statement",
+            "the shaky claim holds",
+            "--status",
+            "candidate",
+            "--evidence-report",
+            "docs/origin.md",
+        ],
+    )?;
+
+    // adversarial experiment with pre-registration hash
+    let created = run_research(
+        temp.path(),
+        &[
+            "experiment",
+            "create",
+            "attack-1",
+            "--branch",
+            "main",
+            "--mode",
+            "falsification",
+            "--hypothesis",
+            "shaky-claim is refutable",
+            "--setup",
+            "attack it",
+            "--primary-metric",
+            "refuted",
+            "--pass",
+            "the claim breaks",
+            "--fail",
+            "the claim survives",
+            "--allowed-next",
+            "record refutation",
+            "--blocked-next",
+            "building on the claim",
+            "--attacks-fact",
+            "shaky-claim",
+        ],
+    )?;
+    assert!(created.contains("registration_hash:"));
+    assert!(created.contains("attacks_fact: shaky-claim"));
+
+    // run notes + negative metric + failed finish via `finish --status failed`
+    run_research(
+        temp.path(),
+        &["experiment", "update", "attack-1", "--status", "running"],
+    )?;
+    let started = run_research(temp.path(), &["run", "start", "attack-1", "--command", "t"])?;
+    let run_id = started.trim().rsplit(' ').next().unwrap().to_string();
+    run_research(
+        temp.path(),
+        &["run", "note", &run_id, "--body", "first incremental note"],
+    )?;
+    let notes = run_research(temp.path(), &["run", "notes", &run_id])?;
+    assert!(notes.contains("first incremental note"));
+    run_research(
+        temp.path(),
+        &["metric", "add", &run_id, "delta", "-0.5", "--unit", "ratio"],
+    )?;
+    fs::write(temp.path().join("output/att.log"), "log")?;
+    run_research(
+        temp.path(),
+        &[
+            "artifact",
+            "add",
+            &run_id,
+            "output/att.log",
+            "--kind",
+            "log",
+        ],
+    )?;
+    let finished = run_research(
+        temp.path(),
+        &[
+            "run",
+            "finish",
+            &run_id,
+            "--status",
+            "failed",
+            "--notes",
+            "attack run crashed",
+        ],
+    )?;
+    assert!(finished.contains("[failed]"));
+
+    // verdict pass -> attacked fact contested
+    let second = run_research(temp.path(), &["run", "start", "attack-1"])?;
+    let run2 = second.trim().rsplit(' ').next().unwrap().to_string();
+    run_research(
+        temp.path(),
+        &["run", "finish", &run2, "--status", "success"],
+    )?;
+    let verdict = run_research(
+        temp.path(),
+        &[
+            "experiment",
+            "verdict",
+            "attack-1",
+            "--outcome",
+            "pass",
+            "--statement",
+            "registered pass criteria met",
+        ],
+    )?;
+    assert!(verdict.contains("recorded verdict `pass`"));
+    assert!(verdict.contains("marked CONTESTED"));
+    let shown = run_research(temp.path(), &["fact", "show", "shaky-claim"])?;
+    assert!(shown.contains("contested"));
+
+    // impact lists the attacker
+    let impact = run_research(temp.path(), &["fact", "impact", "shaky-claim"])?;
+    assert!(impact.contains("attack-1"));
+
+    // drift detection: mutate the registered surface, verdict must refuse
+    run_research(
+        temp.path(),
+        &[
+            "experiment",
+            "update",
+            "attack-1",
+            "--hypothesis",
+            "changed after the fact",
+        ],
+    )?;
+    let drift = research_command()?
+        .current_dir(temp.path())
+        .args(["experiment", "verdict", "attack-1", "--outcome", "pass"])
+        .output()?;
+    assert!(!drift.status.success());
+    assert!(String::from_utf8_lossy(&drift.stderr).contains("drift"));
+
+    // review gate: accepted facts need --reviewed-by when policy demands it
+    let policy_path = temp.path().join(".ldgr/research/policy.yaml");
+    let policy_text = fs::read_to_string(&policy_path)?;
+    fs::write(
+        &policy_path,
+        policy_text.replace(
+            "require_review_for_fact_acceptance: false",
+            "require_review_for_fact_acceptance: true",
+        ),
+    )?;
+    let gated = research_command()?
+        .current_dir(temp.path())
+        .args([
+            "fact",
+            "add",
+            "gated-claim",
+            "--program",
+            "demo",
+            "--statement",
+            "needs review",
+            "--status",
+            "accepted",
+            "--evidence-report",
+            "docs/origin.md",
+        ])
+        .output()?;
+    assert!(!gated.status.success());
+    assert!(String::from_utf8_lossy(&gated.stderr).contains("requires review"));
+    let ok = run_research(
+        temp.path(),
+        &[
+            "fact",
+            "add",
+            "gated-claim",
+            "--program",
+            "demo",
+            "--statement",
+            "needs review",
+            "--status",
+            "accepted",
+            "--evidence-report",
+            "docs/origin.md",
+            "--reviewed-by",
+            "adversarial-agent",
+        ],
+    )?;
+    assert!(ok.contains("created fact gated-claim [accepted]"));
+    Ok(())
+}
+
+#[test]
+fn secondary_source_facts_cannot_be_accepted() -> anyhow::Result<()> {
+    let temp = TempDir::new()?;
+    fs::create_dir_all(temp.path().join("output"))?;
+    run_research(temp.path(), &["init"])?;
+    run_research(
+        temp.path(),
+        &[
+            "program",
+            "create",
+            "demo",
+            "--title",
+            "D",
+            "--objective",
+            "Source classes",
+        ],
+    )?;
+    run_research(temp.path(), &["program", "set-current", "demo"])?;
+
+    // secondary evidence (a tool summary / someone else's report) cannot be accepted
+    let blocked = research_command()?
+        .current_dir(temp.path())
+        .args([
+            "fact",
+            "add",
+            "hearsay",
+            "--program",
+            "demo",
+            "--statement",
+            "their README says X",
+            "--status",
+            "accepted",
+            "--evidence-report",
+            "docs/sweep.md",
+            "--source",
+            "secondary",
+        ])
+        .output()?;
+    assert!(!blocked.status.success());
+    let err = String::from_utf8_lossy(&blocked.stderr);
+    assert!(
+        err.contains("secondary evidence"),
+        "unexpected error: {err}"
+    );
+
+    // recording it as a candidate is fine
+    let cand = run_research(
+        temp.path(),
+        &[
+            "fact",
+            "add",
+            "hearsay",
+            "--program",
+            "demo",
+            "--statement",
+            "their README says X",
+            "--status",
+            "candidate",
+            "--evidence-report",
+            "docs/sweep.md",
+            "--source",
+            "secondary",
+        ],
+    )?;
+    assert!(cand.contains("source_class: secondary"));
+
+    // promoting it while still secondary is refused
+    let promote = research_command()?
+        .current_dir(temp.path())
+        .args(["fact", "update", "hearsay", "--status", "accepted"])
+        .output()?;
+    assert!(!promote.status.success());
+    assert!(String::from_utf8_lossy(&promote.stderr).contains("secondary evidence"));
+
+    // after reading the primary source, reclassify and promote
+    let ok = run_research(
+        temp.path(),
+        &[
+            "fact", "update", "hearsay", "--status", "accepted", "--source", "primary",
+        ],
+    )?;
+    assert!(ok.contains("[accepted]"));
+    let shown = run_research(temp.path(), &["fact", "show", "hearsay"])?;
+    assert!(shown.contains("source_class: primary"));
+    Ok(())
+}
+
+#[test]
+fn context_lists_all_branches_and_terminal_update_answers_option() -> anyhow::Result<()> {
+    let temp = TempDir::new()?;
+    fs::create_dir_all(temp.path().join("output"))?;
+    run_research(temp.path(), &["init"])?;
+    run_research(
+        temp.path(),
+        &[
+            "program",
+            "create",
+            "demo",
+            "--title",
+            "D",
+            "--objective",
+            "Branch visibility",
+        ],
+    )?;
+    run_research(temp.path(), &["program", "set-current", "demo"])?;
+    for (slug, q) in [("main", "main question?"), ("side", "side question?")] {
+        run_research(
+            temp.path(),
+            &[
+                "branch",
+                "create",
+                slug,
+                "--program",
+                "demo",
+                "--title",
+                slug,
+                "--question",
+                q,
+                "--rationale",
+                "r",
+            ],
+        )?;
+    }
+    run_research(temp.path(), &["branch", "set-current", "main"])?;
+
+    // an experiment on the OTHER branch, with a linked option
+    run_research(
+        temp.path(),
+        &[
+            "option",
+            "add",
+            "side-opt",
+            "--program",
+            "demo",
+            "--branch",
+            "side",
+            "--title",
+            "Side option",
+            "--description",
+            "d",
+            "--classification",
+            "exploratory",
+            "--hypothesis",
+            "h",
+        ],
+    )?;
+    run_research(
+        temp.path(),
+        &[
+            "option",
+            "select",
+            "side-opt",
+            "--by",
+            "test",
+            "--rationale",
+            "r",
+        ],
+    )?;
+    run_research(
+        temp.path(),
+        &[
+            "experiment",
+            "create",
+            "side-exp",
+            "--branch",
+            "side",
+            "--option",
+            "side-opt",
+            "--mode",
+            "exploration",
+            "--observation-goal",
+            "see something",
+            "--setup",
+            "s",
+            "--primary-metric",
+            "m",
+        ],
+    )?;
+
+    // context on `main` must still reveal that `side` exists, with its question
+    let ctx = run_research(temp.path(), &["context"])?;
+    assert!(
+        ctx.contains("Program Branches"),
+        "no branch overview:\n{ctx}"
+    );
+    assert!(ctx.contains("side"), "other branch not listed:\n{ctx}");
+    assert!(
+        ctx.contains("side question?"),
+        "other branch's question hidden:\n{ctx}"
+    );
+    assert!(
+        ctx.contains("branch set-current side"),
+        "no switch hint:\n{ctx}"
+    );
+
+    // a terminal status reached via `update` answers the linked option, as `complete` would
+    run_research(
+        temp.path(),
+        &[
+            "experiment",
+            "update",
+            "side-exp",
+            "--branch",
+            "side",
+            "--status",
+            "running",
+        ],
+    )?;
+    let out = run_research(
+        temp.path(),
+        &[
+            "experiment",
+            "update",
+            "side-exp",
+            "--branch",
+            "side",
+            "--status",
+            "failed",
+        ],
+    )?;
+    assert!(
+        out.contains("answered option side-opt"),
+        "option left stale:\n{out}"
+    );
+    Ok(())
+}
+
+/// stderr of a command expected to FAIL, for asserting on guidance messages.
+fn run_research_expect_failure(cwd: &Path, args: &[&str]) -> anyhow::Result<String> {
+    let output = research_command()?.current_dir(cwd).args(args).output()?;
+    anyhow::ensure!(
+        !output.status.success(),
+        "ldgr-research {} unexpectedly succeeded\nstdout:\n{}",
+        args.join(" "),
+        String::from_utf8_lossy(&output.stdout)
+    );
+    Ok(String::from_utf8_lossy(&output.stderr).into_owned())
+}
+
+#[test]
+fn artifact_add_refuses_empty_files_but_allows_an_explicit_override() -> anyhow::Result<()> {
+    // An artifact backs a fact, so a zero-byte file is exactly the failure the evidence gate
+    // exists to prevent: it registers cleanly and its checksum is the digest of the empty
+    // string, so nothing downstream notices that the evidence is vacuous.
+    let temp = TempDir::new()?;
+    fs::create_dir_all(temp.path().join("output"))?;
+    run_research(temp.path(), &["init"])?;
+    fs::write(temp.path().join("output").join("empty.txt"), b"")?;
+
+    let stderr = run_research_expect_failure(
+        temp.path(),
+        &[
+            "artifact",
+            "add",
+            "1",
+            "output/empty.txt",
+            "--kind",
+            "report",
+            "--checksum",
+        ],
+    )?;
+    assert!(
+        stderr.contains("is empty (0 bytes)"),
+        "error should name the emptiness, got: {stderr}"
+    );
+    assert!(
+        stderr.contains("--allow-empty"),
+        "error should name the escape hatch, got: {stderr}"
+    );
+    Ok(())
+}
+
+#[test]
+fn evidence_artifact_rejects_a_path_with_actionable_guidance() -> anyhow::Result<()> {
+    // Passing a path to --evidence-artifact is a natural mistake. The error should say what is
+    // wanted and how to obtain it, rather than surfacing a raw integer-parse failure.
+    let temp = TempDir::new()?;
+    fs::create_dir_all(temp.path().join("output"))?;
+    run_research(temp.path(), &["init"])?;
+    run_research(
+        temp.path(),
+        &[
+            "program",
+            "create",
+            "demo",
+            "--title",
+            "Demo",
+            "--objective",
+            "Exercise the guard",
+        ],
+    )?;
+
+    let stderr = run_research_expect_failure(
+        temp.path(),
+        &[
+            "fact",
+            "add",
+            "some-fact",
+            "--program",
+            "demo",
+            "--status",
+            "candidate",
+            "--statement",
+            "s",
+            "--evidence-artifact",
+            "output/report.txt",
+        ],
+    )?;
+    assert!(
+        stderr.contains("expects an artifact id"),
+        "error should say an id is wanted, got: {stderr}"
+    );
+    assert!(
+        stderr.contains("artifact add"),
+        "error should show how to register it, got: {stderr}"
+    );
+    Ok(())
+}
+
+#[test]
+fn ledger_is_found_from_a_subdirectory() -> anyhow::Result<()> {
+    // The default paths are relative to the working directory, so running from a subdirectory
+    // used to fail with a raw SQLite "unable to open database file", which reads like
+    // corruption rather than "you are in the wrong directory". Resolve upward, as git does.
+    let temp = TempDir::new()?;
+    fs::create_dir_all(temp.path().join("output"))?;
+    run_research(temp.path(), &["init"])?;
+    let nested = temp.path().join("experiments").join("deep").join("deeper");
+    fs::create_dir_all(&nested)?;
+
+    let stdout = run_research(&nested, &["next"])?;
+    assert!(
+        stdout.contains("Ledger:"),
+        "next should resolve the ledger from a subdirectory, got: {stdout}"
+    );
+    Ok(())
+}
+
+#[test]
+fn missing_ledger_explains_itself_instead_of_leaking_sqlite() -> anyhow::Result<()> {
+    let temp = TempDir::new()?;
+    let stderr = run_research_expect_failure(temp.path(), &["next"])?;
+    assert!(
+        stderr.contains("no research ledger at"),
+        "should name the missing ledger, got: {stderr}"
+    );
+    assert!(
+        stderr.contains("ldgr-research init"),
+        "should say how to create one, got: {stderr}"
+    );
+    assert!(
+        !stderr.contains("unable to open database file"),
+        "should not leak the raw SQLite error, got: {stderr}"
+    );
+    Ok(())
+}
+
+#[test]
+fn next_reports_position_and_names_the_following_command() -> anyhow::Result<()> {
+    let temp = TempDir::new()?;
+    fs::create_dir_all(temp.path().join("output"))?;
+    run_research(temp.path(), &["init"])?;
+
+    // With no program set, `next` should say how to create one.
+    let stdout = run_research(temp.path(), &["next"])?;
+    assert!(
+        stdout.contains("program create"),
+        "next should name the first step on an empty ledger, got: {stdout}"
+    );
+    Ok(())
+}
+
+#[test]
+fn fact_add_without_evidence_names_how_to_obtain_some() -> anyhow::Result<()> {
+    let temp = TempDir::new()?;
+    fs::create_dir_all(temp.path().join("output"))?;
+    run_research(temp.path(), &["init"])?;
+    run_research(
+        temp.path(),
+        &[
+            "program",
+            "create",
+            "demo",
+            "--title",
+            "Demo",
+            "--objective",
+            "Exercise the guard",
+        ],
+    )?;
+
+    let stderr = run_research_expect_failure(
+        temp.path(),
+        &[
+            "fact",
+            "add",
+            "f",
+            "--program",
+            "demo",
+            "--status",
+            "candidate",
+            "--statement",
+            "s",
+        ],
+    )?;
+    assert!(stderr.contains("a fact needs evidence"), "got: {stderr}");
+    assert!(
+        stderr.contains("artifact add"),
+        "should name the step that yields an id: {stderr}"
+    );
+    Ok(())
+}

@@ -131,6 +131,9 @@ string_enum!(ArtifactKind, "artifact kind", {
     Model => "model",
     Npz => "npz",
     Midi => "midi",
+    Log => "log",
+    Code => "code",
+    Data => "data",
     Other => "other",
 });
 
@@ -171,6 +174,12 @@ string_enum!(ResearchOptionClassification, "research option classification", {
     LongRunning => "long_running",
     Blocked => "blocked",
     Maintenance => "maintenance",
+});
+
+string_enum!(SourceClass, "source class", {
+    Primary => "primary",
+    Secondary => "secondary",
+    Derived => "derived",
 });
 
 string_enum!(FactStatus, "fact status", {
@@ -343,6 +352,11 @@ pub struct Experiment {
     pub status: String,
     pub created_at: String,
     pub updated_at: String,
+    pub registration_hash: Option<String>,
+    pub attacks_fact: Option<String>,
+    pub verdict_outcome: Option<String>,
+    pub verdict_statement: Option<String>,
+    pub verdict_at: Option<String>,
 }
 
 impl Experiment {
@@ -368,6 +382,11 @@ impl Experiment {
             status: row.get("status")?,
             created_at: row.get("created_at")?,
             updated_at: row.get("updated_at")?,
+            registration_hash: row.get("registration_hash").unwrap_or(None),
+            attacks_fact: row.get("attacks_fact").unwrap_or(None),
+            verdict_outcome: row.get("verdict_outcome").unwrap_or(None),
+            verdict_statement: row.get("verdict_statement").unwrap_or(None),
+            verdict_at: row.get("verdict_at").unwrap_or(None),
         })
     }
 }
@@ -730,6 +749,9 @@ pub struct Fact {
     pub review_state: String,
     pub created_at: String,
     pub updated_at: String,
+    /// primary = source read directly; secondary = someone else's report of it
+    /// (including tool summaries and subagent findings); derived = computed here.
+    pub source_class: Option<String>,
 }
 
 impl Fact {
@@ -747,6 +769,7 @@ impl Fact {
             review_state: row.get("review_state")?,
             created_at: row.get("created_at")?,
             updated_at: row.get("updated_at")?,
+            source_class: row.get("source_class").unwrap_or(None),
         })
     }
 }
