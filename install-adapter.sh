@@ -59,6 +59,9 @@ fi
 
 mkdir -p "$install_root/templates" "$install_root/skills" "$install_root/docs" "$install_root/scripts" "$install_root/prompts"
 cp "$script_dir/adapter.toml" "$install_root/adapter.toml"
+cp "$script_dir/adapter-compatibility.json" "$install_root/adapter-compatibility.json"
+cp "$script_dir/adapter-database-contract.json" "$install_root/adapter-database-contract.json"
+cp "$script_dir/adapter-resources.json" "$install_root/adapter-resources.json"
 cp "$script_dir/loop-prompt.md" "$install_root/loop-prompt.md"
 cp "$script_dir/loop-prompt.md" "$install_root/prompts/research-loop.md"
 cp "$script_dir/templates/"*.md "$install_root/templates/"

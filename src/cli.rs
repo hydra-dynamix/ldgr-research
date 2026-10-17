@@ -122,7 +122,6 @@ pub enum Command {
     Next,
 }
 
-
 /// Locate the project ledger from anywhere inside the project, the way git finds `.git/`.
 ///
 /// The default paths are relative to the working directory, so invoking the CLI from a
@@ -357,7 +356,6 @@ fn handle_workflow() -> anyhow::Result<()> {
     Ok(())
 }
 
-
 /// Report where this ledger stands and the next action, resolved against the live database.
 ///
 /// `agent-guide` documents the canonical flow as static text; the gap it leaves is that a
@@ -375,8 +373,7 @@ fn handle_next(db: &Path, policy: &Path) -> anyhow::Result<()> {
         Some(p) => println!("Program: {p}"),
         None => {
             println!("Program: (none set)");
-            println!("
-Next: ldgr-research program create <slug> --title <t> --objective <o>");
+            println!("\nNext: ldgr-research program create <slug> --title <t> --objective <o>");
             println!("      ldgr-research program set-current <slug>");
             return Ok(());
         }
@@ -385,8 +382,10 @@ Next: ldgr-research program create <slug> --title <t> --objective <o>");
         Some(b) => println!("Branch:  {b}"),
         None => {
             println!("Branch:  (none set)");
-            println!("
-Next: ldgr-research branch create <slug> --program {} --title <t> \\", program.unwrap_or("<program>"));
+            println!(
+                "\nNext: ldgr-research branch create <slug> --program {} --title <t> \\",
+                program.unwrap_or("<program>")
+            );
             println!("              --question <q> --rationale <r>");
             return Ok(());
         }
@@ -401,7 +400,11 @@ Next: ldgr-research branch create <slug> --program {} --title <t> \\", program.u
         .query_map([], |row| row.get(0))?
         .collect::<Result<_, _>>()?;
     let needs_review: i64 = conn
-        .query_row("SELECT COUNT(*) FROM fact WHERE review_state = 'needs_review'", [], |r| r.get(0))
+        .query_row(
+            "SELECT COUNT(*) FROM fact WHERE review_state = 'needs_review'",
+            [],
+            |r| r.get(0),
+        )
         .unwrap_or(0);
 
     println!();
@@ -411,8 +414,7 @@ Next: ldgr-research branch create <slug> --program {} --title <t> \\", program.u
             println!("  run {id} on {slug}");
         }
         let (id, _) = &open_runs[0];
-        println!("
-Next, for run {id}:");
+        println!("\nNext, for run {id}:");
         println!("  ldgr-research artifact add {id} <path> --kind <kind> --checksum");
         println!("  ldgr-research run note {id} --body <text>");
         println!("  ldgr-research run finish {id} --status success");
@@ -423,28 +425,35 @@ Next, for run {id}:");
         for slug in &awaiting {
             println!("  {slug}");
         }
-        println!("
-Next, for {}:", awaiting[0]);
+        println!("\nNext, for {}:", awaiting[0]);
         println!("  ldgr-research run start {} --command <cmd>", awaiting[0]);
-        println!("  ldgr-research experiment verdict {} --outcome pass|fail --statement <why>", awaiting[0]);
+        println!(
+            "  ldgr-research experiment verdict {} --outcome pass|fail --statement <why>",
+            awaiting[0]
+        );
         return Ok(());
     }
     if needs_review > 0 {
         println!("{needs_review} fact(s) awaiting review.");
-        println!("
-Next:");
-        println!("  ldgr-research fact list --program {}", program.unwrap_or("<program>"));
+        println!("\nNext:");
+        println!(
+            "  ldgr-research fact list --program {}",
+            program.unwrap_or("<program>")
+        );
         println!("  ldgr-research fact update <slug> --status accepted --reviewed-by <who>");
         return Ok(());
     }
     println!("Nothing open.");
-    println!("
-Next: register the experiment BEFORE running it, so its criteria are pre-committed:");
-    println!("  ldgr-research experiment create <slug> --branch {} --mode falsification \\", branch.unwrap_or("<branch>"));
+    println!(
+        "\nNext: register the experiment BEFORE running it, so its criteria are pre-committed:"
+    );
+    println!(
+        "  ldgr-research experiment create <slug> --branch {} --mode falsification \\",
+        branch.unwrap_or("<branch>")
+    );
     println!("          --hypothesis <h> --pass <criteria> --fail <criteria>");
     println!("  ldgr-research run start <slug> --command <cmd>");
-    println!("
-The chain experiment -> run -> artifact -> fact is enforced: a fact needs an");
+    println!("\nThe chain experiment -> run -> artifact -> fact is enforced: a fact needs an");
     println!("artifact for evidence, and an artifact needs a run to attach to.");
     Ok(())
 }
@@ -2124,7 +2133,6 @@ fn handle_fact(db: &Path, policy: &Path, args: FactArgs) -> anyhow::Result<()> {
             let branch_id = resolve_branch_for_program(&conn, policy, program.id)?.map(|b| b.id);
             let evidence = evidence_from_creation_args(
                 &conn,
-                policy,
                 program.id,
                 args.evidence_experiment.as_deref(),
                 args.evidence_artifact.as_deref(),
@@ -2246,7 +2254,7 @@ fn handle_fact(db: &Path, policy: &Path, args: FactArgs) -> anyhow::Result<()> {
         FactCommand::Evidence(args) => match args.command {
             FactEvidenceCommand::Add(args) => {
                 let fact = require_fact_in_current_program(&conn, policy, &args.slug)?;
-                let evidence = evidence_from_args(&conn, policy, fact.program_id, &args)?;
+                let evidence = evidence_from_args(&conn, fact.program_id, &args)?;
                 let link = crate::db::add_fact_evidence(&conn, fact.id, &evidence)?;
                 println!("added evidence {} to fact {}", link.id, fact.slug);
             }
@@ -2331,7 +2339,7 @@ fn handle_axiom(db: &Path, policy: &Path, args: AxiomArgs) -> anyhow::Result<()>
         AxiomCommand::Evidence(args) => match args.command {
             AxiomEvidenceCommand::Add(args) => {
                 let axiom = require_axiom_in_current_program(&conn, policy, &args.slug)?;
-                let evidence = evidence_from_args(&conn, policy, axiom.program_id, &args)?;
+                let evidence = evidence_from_args(&conn, axiom.program_id, &args)?;
                 let link = crate::db::add_axiom_evidence(&conn, axiom.id, &evidence)?;
                 println!("added evidence {} to axiom {}", link.id, axiom.slug);
             }
@@ -3953,7 +3961,6 @@ fn parse_id(value: &str, name: &str) -> anyhow::Result<i64> {
 
 fn evidence_from_creation_args<'a>(
     conn: &rusqlite::Connection,
-    policy: &Path,
     program_id: i64,
     experiment: Option<&str>,
     artifact: Option<&str>,
@@ -3970,9 +3977,7 @@ fn evidence_from_creation_args<'a>(
         );
     }
     let experiment_id = match experiment {
-        Some(value) => Some(resolve_experiment_reference(
-            conn, policy, program_id, value,
-        )?),
+        Some(value) => Some(resolve_experiment_reference(conn, program_id, value)?),
         None => None,
     };
     let artifact_id = match artifact {
@@ -3995,14 +4000,11 @@ fn evidence_from_creation_args<'a>(
 
 fn evidence_from_args<'a>(
     conn: &rusqlite::Connection,
-    policy: &Path,
     program_id: i64,
     args: &'a EvidenceAdd,
 ) -> anyhow::Result<crate::schema::NewEvidenceLink<'a>> {
     let experiment_id = match args.experiment.as_deref() {
-        Some(value) => Some(resolve_experiment_reference(
-            conn, policy, program_id, value,
-        )?),
+        Some(value) => Some(resolve_experiment_reference(conn, program_id, value)?),
         None => None,
     };
     let artifact_id = match args.artifact.as_deref() {
@@ -4026,7 +4028,6 @@ fn evidence_from_args<'a>(
 
 fn resolve_experiment_reference(
     conn: &rusqlite::Connection,
-    policy: &Path,
     program_id: i64,
     value: &str,
 ) -> anyhow::Result<i64> {
